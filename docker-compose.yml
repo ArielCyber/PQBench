@@ -1,0 +1,37 @@
+# On the windows host machine go through this steps:
+# Step 1:
+# Write in Powershell:
+# $dest = "$env:USERPROFILE\Documents\NpcapParams.reg"
+# reg export "HKLM\SYSTEM\CurrentControlSet\Services\npcap\Parameters" "$dest" /y
+#
+# Confirm Npcap DLLs exist here (adjust if your path differs)
+# Get-Item "C:\Windows\System32\Npcap\wpcap.dll","C:\Windows\System32\Npcap\Packet.dll"
+
+
+services:
+  pqbench-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.windows
+    isolation: process
+    ports:
+      - "5001:5000"
+    working_dir: "C:\\app"
+    volumes:
+      - type: bind
+        source: C:\Windows\System32\Npcap
+        target: C:\Npcap
+        read_only: true
+    devices:
+      - "class/26e0d1e0-8189-12e0-9914080022301904"
+    environment:
+      PATH: "C:\\Npcap;C:\\Windows\\System32;${PATH}"
+    entrypoint:
+      - powershell
+      - -NoProfile
+      - -ExecutionPolicy
+      - Bypass
+      - -Command
+      - >
+        & 'C:\Python311\python.exe' 'processor.py'
+

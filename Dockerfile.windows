@@ -1,0 +1,47 @@
+# Has .NET Framework 4.8 preinstalled (avoids reboot hell)
+FROM mcr.microsoft.com/dotnet/framework/runtime:4.8-windowsservercore-ltsc2019
+
+SHELL ["powershell","-NoProfile","-ExecutionPolicy","Bypass","-Command"]
+
+# Make sure TLS12 is used for web requests
+RUN [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; \
+    Invoke-Expression (New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')
+
+# Chocolatey non-interactive and ignore any package asking for reboot
+ENV ChocolateyUseWindowsCompression=false
+ENV CHOCOLATEY_ACCEPTLICENSE=Y
+
+# Handy: some packages (e.g., chrome) occasionally signal reboot; ignore that in containers
+# (documented choco switch --ignore-detected-reboot)
+RUN choco feature enable -n=allowGlobalConfirmation ; \
+    choco feature enable -n=useEnhancedExitCodes
+
+# --- Dev/runtime tools ---
+RUN choco install python --version=3.11.9 --ignore-detected-reboot ; \
+    choco install git --ignore-detected-reboot
+
+# --- Browsers & drivers ---
+# Chrome + Chromedriver (driver version should roughly match your Chrome major version;
+# leave unpinned to auto-track Chocolatey package updates or pin if you need exact control)
+RUN choco install googlechrome --ignore-detected-reboot --params "'/NoDesktopShortcuts /DoNotLaunchChrome'" ; \
+    choco install chromedriver --ignore-detected-reboot
+
+ENV CHROME_BIN="C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+
+# Firefox + Geckodriver
+#RUN choco install firefox --ignore-detected-reboot --params "'/RemoveDistributionDir:true'" ; \
+#    choco install geckodriver --ignore-detected-reboot
+
+# App files
+WORKDIR C:/app/
+COPY . C:/app/
+
+# Python deps (expects requirements.txt at repo root)
+RUN C:\Python311\python.exe -m pip install --upgrade pip; \
+    C:\Python311\python.exe -m pip install -r requirements.txt
+
+# Expose Flask port
+EXPOSE 5000
+
+# Launch PQBench
+ENTRYPOINT ["C:\\Python311\\python.exe","processor.py"]
