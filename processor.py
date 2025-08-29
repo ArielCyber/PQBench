@@ -9,9 +9,8 @@ from selenium import webdriver
 from selenium.common import WebDriverException
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.support.wait import WebDriverWait
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.firefox import GeckoDriverManager
+from selenium.webdriver.edge.service import Service as EdgeService
 
 app = Flask(__name__)
 
@@ -47,7 +46,7 @@ def open_browser(browser: str, algo: int):
 
     try:
         if browser.lower() == 'chrome':
-            return open_chrome(algo)
+            return open_edge(algo)
         else:
             return open_firefox(algo)
     except WebDriverException as e:
@@ -83,67 +82,64 @@ def _first_existing(paths):
     return None
 
 
-def find_chrome():
-    # 1) Common 64/32-bit locations
+def find_chromium():
+    """
+    Resolve a Chromium/Chrome executable path.
+    Precedence:
+      1) CHROMIUM_PATH env var
+      2) Common portable/system locations (Chromium or Chrome)
+      3) App Paths registry for chromium.exe or chrome.exe
+    """
+    # 1) Env override
+    env_path = os.getenv("CHROMIUM_PATH")
+    if env_path and Path(env_path).is_file():
+        return env_path
+
+    # 2) Common locations (portable Chromium first, then Chrome fallbacks)
     candidates = [
+        r"C:\chrome-win64\chrome.exe",
+        r"C:\Chromium\chrome.exe",
+        r"C:\Program Files\Chromium\Application\chrome.exe",
+        r"C:\Program Files (x86)\Chromium\Application\chrome.exe",
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.join(os.getenv("LOCALAPPDATA", ""), r"Chromium\Application\chrome.exe"),
         os.path.join(os.getenv("LOCALAPPDATA", ""), r"Google\Chrome\Application\chrome.exe"),
     ]
     for c in candidates:
-        if Path(c).exists():
+        if c and Path(c).is_file():
             return c
 
-    # 2) App Paths registry (prefer 64-bit, then Wow6432Node)
+    # 3) App Paths registry (prefer chromium.exe, then chrome.exe)
     for key_path in [
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chromium.exe",
+        r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\chromium.exe",
         r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
         r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
     ]:
         try:
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as k:
-                exe, _ = winreg.QueryValueEx(k, "")  # (Default)
-                if exe and Path(exe).exists():
+                exe, _ = winreg.QueryValueEx(k, "")
+                if exe and Path(exe).is_file():
                     return exe
         except OSError:
             pass
     return None
 
 
-def open_chrome(algo):
+def open_edge(algo):
+    opts = webdriver.EdgeOptions()
+    opts.add_argument("--headless=new")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--disable-dev-shm-usage")
+    # If you want to force a specific profile dir:
+    # opts.add_argument(r"--user-data-dir=C:\tmp\edg-profile")
 
-    chrome_path = find_chrome()
-    logging.debug(f"Found Chrome at {chrome_path}")
-    chrome_opts = webdriver.ChromeOptions()
-    chrome_opts.binary_location = chrome_path
-
-    # Headless Chrome
-    chrome_opts.add_argument("--no-sandbox")  # containers often need this
-    chrome_opts.add_argument("--headless=new")
-    chrome_opts.add_argument("--disable-gpu")  # Windows workaround
-    chrome_opts.add_argument("--disable-dev-shm-usage")
-    chrome_opts.add_argument("--remote-debugging-port=0")  # avoids DevTools port collision
-    chrome_opts.add_argument("--enable-logging")
-    chrome_opts.add_argument("--v=1")
-    chrome_opts.add_argument("--log-level=0")  # 0=ALL, 1=INFO, 2=WARNING, 3=ERROR, 4=FATAL
-    chrome_opts.add_argument("--log-file=C:\\logs\\chromedriver.log")
-
-    prefs = {"browser": {"enabled_labs_experiments": []}}
-
-    if algo == 0:
-        prefs["browser"]["enabled_labs_experiments"] = ["enable-tls13-kyber@2", "use-ml-kem@2"]
-    elif algo == 1:
-        prefs["browser"]["enabled_labs_experiments"] = ["use-ml-kem@2"]
-    chrome_opts.add_experimental_option("localState", prefs)
-
-    service = ChromeService(
-        log_path="C:\\logs\\chromedriver.log",
-        service_args=["--verbose"])
-
-    try:
-        return webdriver.Chrome(options=chrome_opts, service=service)
-    except WebDriverException as e:
-        logging.critical(e)
-        raise BrowserLaunchError("Failed to open Chrome: is Chrome installed and the driver up to date?") from e
+    # Selenium Manager will locate a compatible msedgedriver if internet is available.
+    # Otherwise, point EdgeService(executable_path="C:\\path\\to\\msedgedriver.exe")
+    driver_path = os.getenv("WEBDRIVER_EDGE_DRIVER", r"C:\WebDriver\bin\msedgedriver.exe")
+    return webdriver.Edge(options=opts, service=EdgeService(executable_path=driver_path))
 
 
 def process_session(browser: str, algo: int, amount: int, domain: str):

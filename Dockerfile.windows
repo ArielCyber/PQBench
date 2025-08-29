@@ -1,47 +1,37 @@
-# Has .NET Framework 4.8 preinstalled (avoids reboot hell)
-FROM mcr.microsoft.com/dotnet/framework/runtime:4.8-windowsservercore-ltsc2019
+# escape=`
 
+# Windows Server Core LTSC 2019 (compatible with Win10 19045 host)
+FROM mcr.microsoft.com/dotnet/framework/runtime:4.8-windowsservercore-ltsc2019
 SHELL ["powershell","-NoProfile","-ExecutionPolicy","Bypass","-Command"]
 
-# Make sure TLS12 is used for web requests
-RUN [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; \
-    Invoke-Expression (New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')
+# --- Chocolatey for Python + 7zip ---
+RUN [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; `
+    iex ((New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')); `
+    choco feature enable -n=allowGlobalConfirmation
 
-# Chocolatey non-interactive and ignore any package asking for reboot
-ENV ChocolateyUseWindowsCompression=false
-ENV CHOCOLATEY_ACCEPTLICENSE=Y
+RUN choco install python --version=3.11.9 --ignore-detected-reboot; `
+    choco install 7zip --ignore-detected-reboot; `
+    choco install microsoft-edge --ignore-detected-reboot --ignore-checksum
 
-# Handy: some packages (e.g., chrome) occasionally signal reboot; ignore that in containers
-# (documented choco switch --ignore-detected-reboot)
-RUN choco feature enable -n=allowGlobalConfirmation ; \
-    choco feature enable -n=useEnhancedExitCodes
+# Create a location for the driver and copy it in
+RUN New-Item -ItemType Directory -Force C:\WebDrivers | Out-Null
+COPY EXE_files/msedgedriver.exe C:/WebDrivers/msedgedriver.exe
 
-# --- Dev/runtime tools ---
-RUN choco install python --version=3.11.9 --ignore-detected-reboot ; \
-    choco install git --ignore-detected-reboot
+# Put it on PATH (machine scope) and expose a helpful env var
+RUN $mp = [Environment]::GetEnvironmentVariable('Path','Machine'); `
+    [Environment]::SetEnvironmentVariable('Path', 'C:\WebDrivers;' + $mp, 'Machine')
+ENV webdriver.edge.driver="C:\WebDrivers\msedgedriver.exe"
 
-# --- Browsers & drivers ---
-# Chrome + Chromedriver (driver version should roughly match your Chrome major version;
-# leave unpinned to auto-track Chocolatey package updates or pin if you need exact control)
-RUN choco install googlechrome --ignore-detected-reboot --params "'/NoDesktopShortcuts /DoNotLaunchChrome'" ; \
-    choco install chromedriver --ignore-detected-reboot
+# (Optional) sanity checks
+RUN msedgedriver --version ; `
+    & 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe' --version
 
-ENV CHROME_BIN="C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+# --- App ---
+WORKDIR C:\app
+COPY . .
+RUN C:\Python311\python.exe -m pip install --upgrade pip; `
+    C:\Python311\python.exe -m pip install -r requirements.txt; `
+    New-Item -ItemType Directory -Path C:\logs -Force | Out-Null
 
-# Firefox + Geckodriver
-#RUN choco install firefox --ignore-detected-reboot --params "'/RemoveDistributionDir:true'" ; \
-#    choco install geckodriver --ignore-detected-reboot
-
-# App files
-WORKDIR C:/app/
-COPY . C:/app/
-
-# Python deps (expects requirements.txt at repo root)
-RUN C:\Python311\python.exe -m pip install --upgrade pip; \
-    C:\Python311\python.exe -m pip install -r requirements.txt
-
-# Expose Flask port
 EXPOSE 5000
-
-# Launch PQBench
 ENTRYPOINT ["C:\\Python311\\python.exe","processor.py"]
