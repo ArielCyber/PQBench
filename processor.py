@@ -113,7 +113,6 @@ def open_chrome(algo):
 
     chrome_path = find_chrome()
     logging.debug(f"Found Chrome at {chrome_path}")
-
     chrome_opts = webdriver.ChromeOptions()
     chrome_opts.binary_location = chrome_path
 
@@ -125,6 +124,8 @@ def open_chrome(algo):
     chrome_opts.add_argument("--remote-debugging-port=0")  # avoids DevTools port collision
     chrome_opts.add_argument("--enable-logging")
     chrome_opts.add_argument("--v=1")
+    chrome_opts.add_argument("--log-level=0")  # 0=ALL, 1=INFO, 2=WARNING, 3=ERROR, 4=FATAL
+    chrome_opts.add_argument("--log-file=C:\\logs\\chromedriver.log")
 
     prefs = {"browser": {"enabled_labs_experiments": []}}
 
@@ -134,8 +135,12 @@ def open_chrome(algo):
         prefs["browser"]["enabled_labs_experiments"] = ["use-ml-kem@2"]
     chrome_opts.add_experimental_option("localState", prefs)
 
+    service = ChromeService(
+        log_path="C:\\logs\\chromedriver.log",
+        service_args=["--verbose"])
+
     try:
-        return webdriver.Chrome(options=chrome_opts)
+        return webdriver.Chrome(options=chrome_opts, service=service)
     except WebDriverException as e:
         logging.critical(e)
         raise BrowserLaunchError("Failed to open Chrome: is Chrome installed and the driver up to date?") from e
