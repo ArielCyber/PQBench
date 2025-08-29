@@ -128,18 +128,23 @@ def find_chromium():
 
 
 def open_edge(algo):
-    opts = webdriver.EdgeOptions()
-    opts.add_argument("--headless=new")
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--disable-dev-shm-usage")
-    # If you want to force a specific profile dir:
-    # opts.add_argument(r"--user-data-dir=C:\tmp\edg-profile")
+    try:
 
-    # Selenium Manager will locate a compatible msedgedriver if internet is available.
-    # Otherwise, point EdgeService(executable_path="C:\\path\\to\\msedgedriver.exe")
-    driver_path = os.getenv("WEBDRIVER_EDGE_DRIVER", r"C:\WebDriver\bin\msedgedriver.exe")
-    return webdriver.Edge(options=opts, service=EdgeService(executable_path=driver_path))
+        opts = webdriver.EdgeOptions()
+        opts.add_argument("--headless=new")
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-gpu")
+        opts.add_argument("--disable-dev-shm-usage")
+        # If you want to force a specific profile dir:
+        # opts.add_argument(r"--user-data-dir=C:\tmp\edg-profile")
+
+        # Selenium Manager will locate a compatible msedgedriver if internet is available.
+        # Otherwise, point EdgeService(executable_path="C:\\path\\to\\msedgedriver.exe")
+        service = EdgeService(executable_path=r"C:\WebDrivers\msedgedriver.exe")
+        return webdriver.Edge(options=opts, service=service)
+    except Exception as e:
+        logging.critical(e)
+        logging.info("Failed to open Edge: is Edge installed and the driver up to date?")
 
 
 def process_session(browser: str, algo: int, amount: int, domain: str):

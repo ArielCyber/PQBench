@@ -10,8 +10,27 @@ RUN [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls1
     choco feature enable -n=allowGlobalConfirmation
 
 RUN choco install python --version=3.11.9 --ignore-detected-reboot; `
-    choco install 7zip --ignore-detected-reboot; `
-    choco install microsoft-edge --ignore-detected-reboot --ignore-checksum
+    choco install 7zip --ignore-detected-reboot
+
+# Install Edge
+RUN mkdir -p C:\temp -force; `
+    # Get the bootstrapper to install edge
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; `
+    Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/?linkid=2108834&Channel=Stable&language=en' -OutFile 'C:\temp\MicrosoftEdgeBootstrapperX64.exe'; `
+    # Start Edge bootstrapper
+    $MSEDGE_BOOTSTRAPPER_EXE_ABSOLUTE_PATH = $(Resolve-Path 'C:\temp\MicrosoftEdgeBootstrapperX64.exe').Path; `
+    Start-Process $MSEDGE_BOOTSTRAPPER_EXE_ABSOLUTE_PATH -ArgumentList @( '/silent', '/install') -Wait -NoNewWindow; `
+    # Clean up
+    Remove-Item $MSEDGE_BOOTSTRAPPER_EXE_ABSOLUTE_PATH -Force; `
+    Remove-Item C:\temp -Force; `
+    # Check Edge installation
+    if(Test-Path "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe") `
+    { `
+        Write-Host "Edge installed at default location!"; `
+    } else { `
+        Write-Host "Edge not installed at default location!"; `
+        exit 1; `
+    }
 
 # Create a location for the driver and copy it in
 RUN New-Item -ItemType Directory -Force C:\WebDrivers | Out-Null
