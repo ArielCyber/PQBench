@@ -12,7 +12,7 @@ services:
   pqbench-ui:
     build:
       context: .
-      dockerfile: Dockerfile.windows
+      dockerfile: Dockerfile.windows.MLKEM
     isolation: process
     ports:
       - "5001:5000"

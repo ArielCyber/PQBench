@@ -16,7 +16,7 @@ from webdriver_manager.firefox import GeckoDriverManager
 app = Flask(__name__)
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)])
 
@@ -58,55 +58,25 @@ def open_firefox(algo):
     """
     Launch a Selenium WebDriver for Firefox with a given Algo.
     """
+    logging.debug("Trying to open Firefox")
 
     firefox_opts = webdriver.FirefoxOptions()
 
     # Headless mode
     firefox_opts.add_argument("-headless")
 
-    if algo == 1:
+    if algo == 0:
         firefox_opts.set_preference('network.http.http3.enable_kyber', False)
         firefox_opts.set_preference('security.tls.enable_kyber', False)
+        logging.debug("Set non PQC preferences")
 
     try:
         gecko_path = GeckoDriverManager().install()
+        logging.debug("Installed GeckoDriverManager successfully!")
         return webdriver.Firefox(service=FirefoxService(gecko_path), options=firefox_opts, )
     except WebDriverException as e:
         logging.critical(e)
         raise BrowserLaunchError("Failed to open Firefox: is Firefox installed and the driver up to date?") from e
-
-
-def _first_existing(paths):
-    for p in paths:
-        if p and Path(p).is_file():
-            return str(Path(p))
-    return None
-
-
-def find_chrome():
-    # 1) Common 64/32-bit locations
-    candidates = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.join(os.getenv("LOCALAPPDATA", ""), r"Google\Chrome\Application\chrome.exe"),
-    ]
-    for c in candidates:
-        if Path(c).exists():
-            return c
-
-    # 2) App Paths registry (prefer 64-bit, then Wow6432Node)
-    for key_path in [
-        r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
-        r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
-    ]:
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as k:
-                exe, _ = winreg.QueryValueEx(k, "")  # (Default)
-                if exe and Path(exe).exists():
-                    return exe
-        except OSError:
-            pass
-    return None
 
 
 def open_chrome(algo):

@@ -34,9 +34,8 @@ RUN choco install googlechrome --version=139.0.7258.155  --ignore-detected-reboo
 
 ENV CHROME_BIN="C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
 
-# Firefox + Geckodriver
-#RUN choco install firefox --ignore-detected-reboot --params "'/RemoveDistributionDir:true'" ; `
-#    choco install geckodriver --ignore-detected-reboot
+# Firefox
+RUN choco install firefox --version=142.0.1 --params '"/NoTaskbarShortcut /NoDesktopShortcut /NoStartMenuShortcut /NoAutoUpdate"'
 
 # App files
 WORKDIR C:/app/
