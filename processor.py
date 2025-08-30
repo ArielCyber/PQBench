@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+from time import sleep
 
 from flask import Flask, request, jsonify
 from selenium import webdriver
@@ -162,11 +163,14 @@ def process_session(browser: str, algo: int, amount: int, domain: str):
         logging.debug(f"The driver opened the given domain")
 
         try:
-            # Wait until document is fully ready (or a small dwell)
-            logging.debug(f"Waiting for the web driver")
+            # Wait until DOM is complete
             WebDriverWait(driver, 10).until(
                 lambda d: d.execute_script("return document.readyState") == "complete")
-            # sleep(3)
+            logging.debug("Page DOM complete")
+
+            # Dwell a bit to let scripts/network calls finish
+            sleep(5)
+
         finally:
             driver.quit()
 

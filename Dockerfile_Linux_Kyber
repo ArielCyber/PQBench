@@ -40,6 +40,23 @@ RUN set -eux; \
 ENV CHROME_BIN=/usr/bin/chromium \
     CHROMEDRIVER_PATH=/usr/local/bin/chromedriver
 
+# --- Install Firefox 130.0.1 directly from Mozilla ---
+ARG FIREFOX_VERSION=130.0.1
+RUN set -eux; \
+  apt-get update && apt-get install -y --no-install-recommends \
+    wget ca-certificates \
+    bzip2 xz-utils \
+    libgtk-3-0 libdbus-glib-1-2 libxt6 libx11-xcb1 \
+    libnss3 libxss1 libxcomposite1 libxdamage1 libasound2 fonts-liberation \
+  && rm -rf /var/lib/apt/lists/* \
+  # download (redirects to a .tar.bz2 or .tar.xz)
+  && wget -O /tmp/firefox.tar "https://download.mozilla.org/?product=firefox-${FIREFOX_VERSION}&os=linux64&lang=en-US" \
+  && mkdir -p /opt \
+  # try bzip2 first, then xz if needed
+  && ( tar -C /opt -xjf /tmp/firefox.tar || tar -C /opt -xJf /tmp/firefox.tar ) \
+  && ln -sf /opt/firefox/firefox /usr/local/bin/firefox \
+  && rm /tmp/firefox.tar
+
 # ---------- App ----------
 WORKDIR /app
 COPY requirements.txt .
