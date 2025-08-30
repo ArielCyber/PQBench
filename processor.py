@@ -123,8 +123,6 @@ def open_chrome(algo):
     chrome_opts.add_argument("--disable-gpu")  # Windows workaround
     chrome_opts.add_argument("--disable-dev-shm-usage")
     chrome_opts.add_argument("--remote-debugging-port=0")  # avoids DevTools port collision
-    chrome_opts.add_argument("--enable-logging")
-    chrome_opts.add_argument("--v=1")
 
     prefs = {"browser": {"enabled_labs_experiments": []}}
 
@@ -132,6 +130,7 @@ def open_chrome(algo):
         prefs["browser"]["enabled_labs_experiments"] = ["enable-tls13-kyber@2", "use-ml-kem@2"]
     elif algo == 1:
         prefs["browser"]["enabled_labs_experiments"] = ["use-ml-kem@2"]
+
     chrome_opts.add_experimental_option("localState", prefs)
 
     try:
