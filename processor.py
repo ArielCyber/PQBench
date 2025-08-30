@@ -18,100 +18,6 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-"""
-TODO:
-1. Improve exception handling
-2. Change README
-3. Clean windows leftovers from the code
-"""
-
-
-def path_leaf(path):
-    """
-    Extract the final component (file or folder name) from a filesystem path.
-
-    Parameters
-    ----------
-    path : str
-        The full path to a file or directory.
-
-    Returns
-    -------
-    str
-        The last path component. If `path` ends with a slash, returns the last non-empty component.
-    """
-    head, tail = os.path.split(path)
-    return tail or os.path.basename(head)
-
-
-def loop_thru_all_files_in(path: str, ips: list[str]) -> tuple[int, str] | None:
-    """
-    Scan all pcap files in a directory and select the stream with the most packets involving given IPs.
-
-    Reads each file, counts packets, and filters by presence of any IP in source or destination.
-
-    Parameters
-    ----------
-    path : str
-        Directory containing pcap files to scan.
-    ips : list[str]
-        List of IP addresses to filter on.
-
-    Returns
-    -------
-    tuple[int, str] or None
-        A tuple (packet_count, file_path) for the pcap with the highest packet count involving the IPs,
-        or None if no file matches.
-    """
-    with os.scandir(path) as it:
-        pcaps = []
-        for entry in it:
-            if entry.is_file():
-                packets = rdpcap(entry.path)
-                if any(
-                        packet.haslayer(IP) and (
-                                packet[IP].src in ips or packet[IP].dst in ips
-                        )
-                        for packet in packets
-                ):
-                    pcaps.append((len(packets), entry.path))
-        return max(pcaps) if pcaps else None
-
-
-def split_streams(input_pcap: str, output_dir: str) -> None:
-    """
-    Split a pcap file into separate stream-based pcaps using tshark.
-
-    Extracts unique TCP stream IDs, then writes each stream to its own file.
-
-    Parameters
-    ----------
-    input_pcap : str
-        Path to the input pcap file.
-    output_dir : str
-        Directory where split pcap files will be written. Created if it does not exist.
-
-    Returns
-    -------
-    None
-    """
-    try:
-        stream_ids = subprocess.check_output(
-            ['tshark', '-r', input_pcap, '-T', 'fields', '-e', 'tcp.stream']
-        ).decode().splitlines()
-        stream_ids = sorted(set(stream_ids))
-    except subprocess.CalledProcessError as e:
-        print(f"Error extracting streams: {e}")
-        return
-    os.makedirs(output_dir, exist_ok=True)
-    for sid in stream_ids:
-        if sid.strip():
-            out = os.path.join(output_dir, f"temp{sid}.pcap")
-            subprocess.run([
-                'tshark', '-r', input_pcap, '-w', out,
-                '-2', '-R', f'tcp.stream=={sid}'
-            ])
-
 
 @app.route('/')
 def root():
@@ -124,41 +30,6 @@ def root():
         The contents of 'main_page.html' from the static folder.
     """
     return app.send_static_file('main_page.html')
-
-
-def name_dir(browser: str, pqc_mode: int) -> str:
-    """
-    Generate a directory name encoding configuration parameters.
-
-    Encodes algorithm, OS, browser, and PQC flag into a numeric string.
-
-    Parameters
-    ----------
-    browser : str
-        Browser name ('chrome' or 'firefox').
-    pqc_mode : int
-        PQC mode:
-          0 - Non-PQC
-          1 - Kyber
-          2 - MLKEM
-
-    Returns
-    -------
-    str
-        A string directory name, e.g. '231'.
-    """
-
-    scheme = {
-        None: 0,
-        'firefox': 1, 'chrome': 2,
-        'Darwin': 4, 'Linux': 3, 'Windows': 2
-    }
-
-    os_code = scheme.get(platform_module.system(), 0)
-    browser_code = scheme.get(browser, 0)
-    pqc_code = pqc_mode
-
-    return f"{os_code}{browser_code}{pqc_code}"
 
 
 def open_browser(browser: str, pqc_mode: int, headless: bool = True):
@@ -206,19 +77,19 @@ def open_browser(browser: str, pqc_mode: int, headless: bool = True):
 
     subprocess.run(['echo', "PQC mode confirmation: " + str(pqc_mode)])
     # ----- Chrome PQC experiments (via Local State "enabled_labs_experiments") -----
-    # if pqc_mode == 0:
-    #     chrome_local_state_prefs["browser"]["enabled_labs_experiments"] = [
-    #         "enable-tls13-kyber@2",
-    #         "use-ml-kem@2"]
-    #
-    # elif pqc_mode == 1:
-    #     chrome_local_state_prefs["browser"]["enabled_labs_experiments"] = [
-    #         "use-ml-kem@2"]
-    # elif pqc_mode == 2:  # ML-KEM
-    #     chrome_local_state_prefs["browser"]["enabled_labs_experiments"] = [
-    #         "enable-tls13-kyber@2",  # Disabled
-    #         "use-ml-kem@1",  # Enabled
-    #     ]
+    if pqc_mode == 0:
+        chrome_local_state_prefs["browser"]["enabled_labs_experiments"] = [
+            "enable-tls13-kyber@2",
+            "use-ml-kem@2"]
+
+    elif pqc_mode == 1:
+        chrome_local_state_prefs["browser"]["enabled_labs_experiments"] = [
+            "use-ml-kem@2"]
+    elif pqc_mode == 2:  # ML-KEM
+        chrome_local_state_prefs["browser"]["enabled_labs_experiments"] = [
+            "enable-tls13-kyber@2",  # Disabled
+            "use-ml-kem@1",  # Enabled
+        ]
 
     user_data_dir = os.path.abspath(os.path.join(os.getcwd(), "tmp_chrome_profile"))
     shutil.rmtree(user_data_dir, ignore_errors=True)
@@ -266,7 +137,6 @@ def process_session(browser: str, pqc: bool, algo: str | None, amount: int, doma
     Execute a browsing and packet-capture session over multiple iterations.
 
     For each iteration:
-    1. Creates `sniffer.py` to capture packets into a pcap file.
     2. Launch the browser to visit the domain.
     3. Split streams and filter by IPs.
     4. Save pcaps with more than 20 packets to the final directory.
@@ -315,7 +185,6 @@ def process_session(browser: str, pqc: bool, algo: str | None, amount: int, doma
     i = 0
     while i < amount:
         sniff_pcap = f'sniff-{i}.pcap'
-        cmd = [exe, 'sniffer.py', '--pcap', sniff_pcap]
         proc = subprocess.Popen(cmd)
         subprocess.run(['echo', "About to open the browser..."])
         driver = open_browser(browser, pqc_mode)
