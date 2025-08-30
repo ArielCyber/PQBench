@@ -16,7 +16,7 @@ from webdriver_manager.firefox import GeckoDriverManager
 app = Flask(__name__)
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)])
 
@@ -111,11 +111,7 @@ def find_chrome():
 
 def open_chrome(algo):
 
-    chrome_path = find_chrome()
-    logging.debug(f"Found Chrome at {chrome_path}")
-
     chrome_opts = webdriver.ChromeOptions()
-    chrome_opts.binary_location = chrome_path
 
     # Headless Chrome
     chrome_opts.add_argument("--no-sandbox")  # containers often need this
@@ -126,15 +122,27 @@ def open_chrome(algo):
 
     prefs = {"browser": {"enabled_labs_experiments": []}}
 
+    # ----- Chrome PQC experiments (via Local State "enabled_labs_experiments") -----
     if algo == 0:
-        prefs["browser"]["enabled_labs_experiments"] = ["enable-tls13-kyber@2", "use-ml-kem@2"]
+        prefs["browser"]["enabled_labs_experiments"] = [
+            "enable-tls13-kyber@2",
+            "use-ml-kem@2"]
+
     elif algo == 1:
-        prefs["browser"]["enabled_labs_experiments"] = ["use-ml-kem@2"]
+        prefs["browser"]["enabled_labs_experiments"] = [
+            "use-ml-kem@2"]
+    elif algo == 2:  # ML-KEM
+        prefs["browser"]["enabled_labs_experiments"] = [
+            "enable-tls13-kyber@2",  # Disabled
+            "use-ml-kem@1",  # Enabled
+        ]
 
     chrome_opts.add_experimental_option("localState", prefs)
 
     try:
-        return webdriver.Chrome(options=chrome_opts)
+        chromedriver_path = ChromeDriverManager().install()
+        service = ChromeService(executable_path=chromedriver_path)
+        return webdriver.Chrome(options=chrome_opts, service=service)
     except WebDriverException as e:
         logging.critical(e)
         raise BrowserLaunchError("Failed to open Chrome: is Chrome installed and the driver up to date?") from e

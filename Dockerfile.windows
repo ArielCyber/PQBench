@@ -13,9 +13,6 @@ RUN [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tl
 ENV ChocolateyUseWindowsCompression=false
 ENV CHOCOLATEY_ACCEPTLICENSE=Y
 
-ENV HOST_RESOLVER_MAP = "pq.cloudflareresearch.com 104.18.30.220"
-ENV NETLOG = "1"
-
 # Handy: some packages (e.g., chrome) occasionally signal reboot; ignore that in containers
 # (documented choco switch --ignore-detected-reboot)
 RUN choco feature enable -n=allowGlobalConfirmation ; `
@@ -32,8 +29,8 @@ WORKDIR /
 # --- Browsers & drivers ---
 # Chrome + Chromedriver (driver version should roughly match your Chrome major version;
 # leave unpinned to auto-track Chocolatey package updates or pin if you need exact control)
-RUN choco install googlechrome --ignore-detected-reboot --params "'/NoDesktopShortcuts /DoNotLaunchChrome'" ; `
-    choco install chromedriver --ignore-detected-reboot
+RUN choco install googlechrome --version=139.0.7258.155  --ignore-detected-reboot --params "'/NoDesktopShortcuts /DoNotLaunchChrome'" ; `
+    choco install chromedriver --version=139.0.7258.154 --ignore-detected-reboot
 
 ENV CHROME_BIN="C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
 
