@@ -16,8 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       tshark tcpdump \
     && rm -rf /var/lib/apt/lists/*
 
-# ---------- Chromium 129 + Chromedriver 129 (Chrome for Testing) ----------
-ARG CFT_VER="128.0.6613.137"
+# ---------- Chromium 128 + Chromedriver 128 (Chrome for Testing) ----------
+ARG CFT_VER="139.0.7258.155"
 
 # Official CfT URLs (public, no auth)
 ARG CFT_CHROMIUM_URL="https://storage.googleapis.com/chrome-for-testing-public/${CFT_VER}/linux64/chrome-linux64.zip"

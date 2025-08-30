@@ -80,6 +80,16 @@
 <body>
   <h1>PQBench Configuration</h1>
   <form id="configForm">
+
+    <div>
+      <label for="os">Operating System:</label>
+      <select id="os" name="os">
+        <option value="0">Linux</option>
+        <option value="1">Windows</option>
+        <option value="2">MacOS</option>
+      </select>
+    </div>
+
     <div>
       <label for="browser">Browser:</label>
       <select id="browser" name="browser">
@@ -89,24 +99,17 @@
     </div>
 
     <div>
-      <label for="pqc">PQC Encryption:</label>
-      <select id="pqc" name="pqc">
-        <option value="true">True</option>
-        <option value="false">False</option>
+      <label for="algo">PQC Encryption:</label>
+      <select id="algo" name="algo">
+        <option value="0">Non-PQC</option>
+        <option value="1">Kyber</option>
+        <option value="2">MLKEM</option>
       </select>
     </div>
 
     <div>
-      <label for="algorithm">Algorithm:</label>
-      <select id="algorithm" name="algorithm">
-        <option value="kyber">Kyber</option>
-        <option value="mlkem">MLKEM</option>
-      </select>
-    </div>
-
-    <div>
-      <label for="packets">Session Count:</label>
-      <input type="number" id="packets" name="packets" min="1" required />
+      <label for="sessions">Session Count:</label>
+      <input type="number" id="sessions" name="sessions" min="1" required />
     </div>
 
     <div>
@@ -135,9 +138,8 @@
 
       const config = {
         browser:   document.getElementById('browser').value,
-        pqc:       document.getElementById('pqc').value === 'true',
-        algorithm: document.getElementById('algorithm').value,
-        packets:   parseInt(document.getElementById('packets').value, 10)
+        algorithm: document.getElementById('algo').value,
+        sessions:   parseInt(document.getElementById('sessions').value, 10)
       };
 
       try {
