@@ -1,0 +1,22 @@
+version: "3.9"
+services:
+  router:
+    build: .
+    ports: ["5000:5000"]
+    environment:
+      URL_LINUX_CHROME_KYBER:  http://linux-ck:8000
+      URL_LINUX_CHROME_MLKEM:  http://linux-cm:8000
+      # need to add the rest
+
+    networks: [appnet]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+networks:
+  appnet:
+    name: shared-appnet
+    driver: bridge
