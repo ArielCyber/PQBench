@@ -1,3 +1,5 @@
+$scriptName = $env:PROCESS_SCRIPT
+
 & "c:\Program Files (x86)\Google\Chrome\Application\chrome.exe" --headless --disable-gpu --no-sandbox --enable-logging --print-to-pdf="C:/export/pdftest.pdf" https://www.google.com
 
-& "C:\Python311\python.exe" "processor.py"
+& "C:\Python311\python.exe" $scriptName

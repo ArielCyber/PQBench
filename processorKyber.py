@@ -58,7 +58,7 @@ def open_firefox(algo):
     """
     Launch a Selenium WebDriver for Firefox with a given Algo.
     """
-    logging.debug("Trying to open Firefox")
+    logging.debug(f"Trying to open Firefox, algo is {algo}")
 
     firefox_opts = webdriver.FirefoxOptions()
 
@@ -69,6 +69,12 @@ def open_firefox(algo):
         firefox_opts.set_preference('network.http.http3.enable_kyber', False)
         firefox_opts.set_preference('security.tls.enable_kyber', False)
         logging.debug("Set non PQC preferences")
+
+    if algo == 1 or algo == 2:  # Enable Kyber or MLKEM (Same flags)
+        firefox_opts.set_preference("security.tls.enable_kyber", True)
+        firefox_opts.set_preference("network.http.http3.enabled", True)
+        firefox_opts.set_preference("network.http.http3.enable_kyber", True)
+        logging.debug("Set PQC on")
 
     try:
         gecko_path = GeckoDriverManager().install()
@@ -89,6 +95,7 @@ def open_chrome(algo):
     chrome_opts.add_argument("--disable-gpu")  # Windows workaround
     chrome_opts.add_argument("--disable-dev-shm-usage")
     chrome_opts.add_argument("--remote-debugging-port=0")  # avoids DevTools port collision
+    chrome_opts.binary_location = r"C:\Program Files\chrome-win64\chrome.exe"
 
     prefs = {"browser": {"enabled_labs_experiments": []}}
 
@@ -104,7 +111,7 @@ def open_chrome(algo):
     chrome_opts.add_experimental_option("localState", prefs)
 
     try:
-        chromedriver_path = ChromeDriverManager().install()
+        chromedriver_path = ChromeDriverManager(driver_version="128.0.6613.1373").install()
         service = ChromeService(executable_path=chromedriver_path)
         return webdriver.Chrome(options=chrome_opts, service=service)
     except WebDriverException as e:

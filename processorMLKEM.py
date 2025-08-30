@@ -69,6 +69,11 @@ def open_firefox(algo):
         firefox_opts.set_preference('network.http.http3.enable_kyber', False)
         firefox_opts.set_preference('security.tls.enable_kyber', False)
         logging.debug("Set non PQC preferences")
+    if algo == 1 or algo == 2:  # Enable Kyber or MLKEM (Same flags)
+        firefox_opts.set_preference("security.tls.enable_kyber", True)
+        firefox_opts.set_preference("network.http.http3.enabled", True)
+        firefox_opts.set_preference("network.http.http3.enable_kyber", True)
+        logging.debug("Set PQC on")
 
     try:
         gecko_path = GeckoDriverManager().install()
