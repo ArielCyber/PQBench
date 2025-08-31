@@ -9,7 +9,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # libpcap for scapy capture; tshark for splitting; iproute2/net-tools are handy for debugging.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       tshark tcpdump iproute2 net-tools ca-certificates curl \
+    && apt-get install -y iputils-ping\
     && rm -rf /var/lib/apt/lists/*
+
 
 # FastAPI + scapy
 RUN pip install --no-cache-dir fastapi uvicorn[standard] scapy requests

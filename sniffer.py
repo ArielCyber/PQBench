@@ -6,7 +6,7 @@ import threading
 import subprocess
 from datetime import datetime
 from typing import Optional, List
-
+import socket
 import requests
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field, IPvAnyAddress, constr
@@ -25,8 +25,8 @@ log = logging.getLogger("pqbench.sniffer")
 
 # ---------- Config ----------
 OUTPUT_ROOT = os.environ.get("OUTPUT_ROOT", "/output")
-CF_IPV4_URL = os.environ.get("CF_IPV4_URL", "https://pq.cloudflareresearch.com/ips-v4")
-CF_IPV6_URL = os.environ.get("CF_IPV6_URL", "https://pq.cloudflareresearch.com/ips-v6")
+CF_IPV4_URL = os.environ.get("CF_IPV4_URL", "https://www.cloudflare.com/ips-v4")
+CF_IPV6_URL = os.environ.get("CF_IPV6_URL", "https://www.cloudflare.com/ips-v6")
 FETCH_CF_ON_START = os.environ.get("CF_FETCH_ON_START", "true").lower() == "true"
 
 log.debug(f"Config: OUTPUT_ROOT={OUTPUT_ROOT} CF_IPV4_URL={CF_IPV4_URL} "
@@ -53,12 +53,14 @@ class StartRequest(BaseModel):
     """
     os: constr(strip_whitespace=True) = Field(description="linux/windows/macos (for name_dir)")
     browser: constr(strip_whitespace=True) = Field(description="chrome/firefox (for name_dir)")
-    algo: int = Field(ge=1, le=3, description="1=Non-PQC, 2=Kyber, 3=MLKEM")
+    algo: int = Field(ge=0, le=2, description="0=Non-PQC, 1=Kyber, 2=MLKEM")
     container_ip: IPvAnyAddress = Field(description="Target container IP to sniff")
     duration_sec: int = Field(60, ge=1, le=3600, description="How long to capture")
     iface: Optional[str] = Field(default="any", description="Interface to capture on (default: any)")
     split_streams: bool = Field(default=True, description="Whether to split TCP streams with tshark")
     filter_mode: constr(strip_whitespace=True) = Field(default="cloudflare", description="cloudflare | custom")
+    domain: Optional[str] = Field(default="pq.cloudflareresearch.com",
+                                  description="When filter_mode=domain, FQDN to resolve and filter on")
     custom_bpf: Optional[str] = Field(default=None, description="When filter_mode=custom, full BPF filter")
 
 
@@ -84,10 +86,56 @@ class StatusResponse(BaseModel):
 
 
 # ---------- Helpers ----------
+def _resolve_domain_ips(hostname: str) -> tuple[list[str], list[str]]:
+    """Return (v4_list, v6_list) unique IPs for the domain."""
+    logging.debug("_resolve_domain_ips(): resolving %r", hostname)
+    v4s: List[str] = []
+    v6s: List[str] = []
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+        logging.debug("_resolve_domain_ips(): getaddrinfo returned %d records", len(infos))
+        for family, _, _, _, sockaddr in infos:
+            if family == socket.AF_INET:
+                ip = sockaddr[0]
+                if ip not in v4s:
+                    v4s.append(ip)
+            elif family == socket.AF_INET6:
+                ip = sockaddr[0]
+                if ip not in v6s:
+                    v6s.append(ip)
+        logging.debug("_resolve_domain_ips(): v4=%s | v6=%s", v4s, v6s)
+    except Exception as e:
+        logging.exception("_resolve_domain_ips(): failed to resolve %r: %s", hostname, e)
+    return v4s, v6s
+
+
+def _build_domain_bpf(container_ip: str, domain_v4: List[str], domain_v6: List[str]) -> str:
+    """
+    (host <container_ip>) and ( (ip and (src host IP or dst host IP ...)) or (ip6 ... ) )
+    Include both directions so we catch requests and responses.
+    """
+    logging.debug("_build_domain_bpf(): container=%s v4=%s v6=%s", container_ip, domain_v4, domain_v6)
+    v4_parts = [f"(dst host {ip} or src host {ip})" for ip in domain_v4]
+    v6_parts = [f"(dst host {ip} or src host {ip})" for ip in domain_v6]
+
+    v4_clause = f"(ip and ({' or '.join(v4_parts)}))" if v4_parts else ""
+    v6_clause = f"(ip6 and ({' or '.join(v6_parts)}))" if v6_parts else ""
+    clause = " or ".join([c for c in [v4_clause, v6_clause] if c])
+
+    if not clause:
+        logging.warning("_build_domain_bpf(): empty domain IP set; falling back to (ip or ip6)")
+        clause = "ip or ip6"
+
+    bpf = f"(host {container_ip}) and ({clause})"
+    logging.debug("_build_domain_bpf(): BPF=%s", bpf)
+    return bpf
+
+
 def name_dir(os_name: str, browser: str, algo: int) -> str:
     """
-    Mirrors your function, but ensures algo is int {1,2,3}.
-    OS: linux=1, windows=2, macos=3; Browser: firefox=1, chrome=2; Algo: 1/2/3
+    OS: Linux - 1, Windows - 2, MacOS - 3;
+    Browser: Firefox - 1, chrome - 2;
+    Algo: Non PQC - 0, Kyber - 1, MLKEM - 2
     """
     os_map = {"linux": "1", "windows": "2", "macos": "3"}
     browser_map = {"firefox": "1", "chrome": "2"}
@@ -157,6 +205,7 @@ def _build_cf_bpf(container_ip: str, cf_v4: List[str], cf_v6: List[str]) -> str:
     Includes both directions (src or dst CF).
     """
     # (host <container_ip>) AND ((ip and (src/dst net CFv4...)) OR (ip6 and (src/dst net CFv6...)))
+    logging.debug("_build_cf_bpf(): container=%s cf_v4=%d cf_v6=%d", container_ip, len(cf_v4), len(cf_v6))
     v4_parts = [f"(dst net {cidr} or src net {cidr})" for cidr in cf_v4]
     v6_parts = [f"(dst net {cidr} or src net {cidr})" for cidr in cf_v6]
 
@@ -165,6 +214,7 @@ def _build_cf_bpf(container_ip: str, cf_v4: List[str], cf_v6: List[str]) -> str:
     cf_clause = " or ".join([c for c in [v4_clause, v6_clause] if c])
 
     if not cf_clause:
+        logging.warning("_build_cf_bpf(): CF lists empty; falling back to (ip or ip6)")
         # Fallback: just the container host (shouldn't happen if CF fetch works)
         cf_clause = "ip or ip6"
 
@@ -219,17 +269,9 @@ def _capture_job(outfile: str, iface: str, bpf: str, duration: int, do_split: bo
 
 @app.post("/start", response_model=StartResponse)
 def start_capture(req: StartRequest, tasks: BackgroundTasks):
-    log.debug(f"/start called with: {req.model_dump()}")
-    # quick iface sanity
-    ifaces = set(get_if_list())
-    iface = (req.iface or "any")
-    if iface != "any" and iface not in ifaces:
-        log.error(f"Requested iface '{iface}' not found. Available: {sorted(ifaces)}")
-        raise HTTPException(status_code=400, detail=f"Interface '{iface}' not found.")
-
+    logging.debug("/start called with: %s", req.dict())
     with _lock:
         if _active["running"]:
-            log.warning("Rejecting /start: capture already running")
             raise HTTPException(status_code=409, detail="A capture is already running")
 
         code = name_dir(req.os, req.browser, req.algo)
@@ -237,30 +279,39 @@ def start_capture(req: StartRequest, tasks: BackgroundTasks):
         session_dir = os.path.join(OUTPUT_ROOT, code, f"session-{ts}")
         os.makedirs(session_dir, exist_ok=True)
         outfile = os.path.join(session_dir, "raw.pcap")
-        log.debug(f"Session dir prepared: {session_dir}")
+        logging.debug("Session dir prepared: %s", session_dir)
 
+        # Build filter
         if req.filter_mode == "custom":
             if not req.custom_bpf:
-                log.error("custom_bpf missing while filter_mode=custom")
                 raise HTTPException(status_code=400, detail="custom_bpf required when filter_mode=custom")
             bpf = f"(host {req.container_ip}) and ({req.custom_bpf})"
-            log.debug(f"Custom BPF: {bpf}")
+            logging.debug("Using custom BPF: %s", bpf)
+        elif req.filter_mode == "domain":
+            if not req.domain:
+                raise HTTPException(status_code=400, detail="domain required when filter_mode=domain")
+            v4s, v6s = _resolve_domain_ips(req.domain)
+            bpf = _build_domain_bpf(str(req.container_ip), v4s, v6s)
         else:
             bpf = _build_cf_bpf(str(req.container_ip), _CF_V4, _CF_V6)
 
+        # Mark active and launch background capture
         _active.update({
             "running": True,
             "started_at": time.time(),
             "target_ip": str(req.container_ip),
-            "outfile": outfile,
-            "last_bpf": bpf
+            "outfile": outfile
         })
+        logging.info("Scheduling capture: iface=%s target=%s duration=%ss split=%s",
+                    req.iface or "any", req.container_ip, req.duration_sec, req.split_streams)
 
-        log.info(f"Scheduling capture: iface={iface} target={req.container_ip} "
-                 f"duration={req.duration_sec}s split={req.split_streams}")
-        tasks.add_task(_capture_job, outfile, iface, bpf, req.duration_sec, req.split_streams, session_dir)
+        tasks.add_task(_capture_job, outfile, req.iface or "any", bpf, req.duration_sec,
+                       req.split_streams, session_dir)
 
-        return StartResponse(started=True, session_dir=session_dir, outfile=outfile, iface=iface, bpf=bpf)
+        resp = StartResponse(started=True, session_dir=session_dir, outfile=outfile,
+                             iface=req.iface or "any", bpf=bpf)
+        logging.debug("StartResponse: %s", resp.dict())
+        return resp
 
 
 # ---------- Lifespan: fetch Cloudflare ranges at startup ----------
