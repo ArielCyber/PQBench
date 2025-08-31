@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir fastapi uvicorn[standard] scapy requests
 
 # App
 WORKDIR /app
-COPY sniffer_service.py /app/sniffer_service.py
+COPY sniffer.py /app/sniffer.py
 
 # Where captures land (mount this as a volume)
 VOLUME ["/output"]
@@ -26,4 +26,4 @@ ENV OUTPUT_ROOT=/output \
     CF_FETCH_ON_START=true
 
 # Run the API
-CMD ["uvicorn", "sniffer_service:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-graceful-shutdown", "10"]
+CMD ["uvicorn", "sniffer:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-graceful-shutdown", "10"]

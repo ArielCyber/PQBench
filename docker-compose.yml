@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  # Sniffer runs on the host network, so it can see packets on all docker bridges.
+  sniffer:
+    build:
+      context: .
+      # dockerfile: Dockerfile   # uncomment if your sniffer Dockerfile has a different name
+    container_name: pqbench-sniffer
+    ports:
+      - "8080:8080"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      - OUTPUT_ROOT=/output
+      - CF_FETCH_ON_START=true
+      - LOG_LEVEL=DEBUG
+      # - CF_IPV4_URL=https://pq.cloudflareresearch.com/ips-v4
+      # - CF_IPV6_URL=https://pq.cloudflareresearch.com/ips-v6
+    volumes:
+      - ./output:/output
+    restart: unless-stopped
+    depends_on:
+      - testapp
+    # no 'ports:' and no 'networks:' when using host networking
+
+  # Your test container (any simple Linux service you want to generate traffic from).
+  testapp:
+    build:
+      context: ./container_test
+      dockerfile: Dockerfile_Linux_Kyber
+    container_name: pqbench-testapp
+    ports:
+      - "5002:5000"
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      pqbench-net:
+        ipv4_address: 172.28.0.23   # Fixed IP
+
+networks:
+  pqbench-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
