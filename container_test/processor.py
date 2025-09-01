@@ -3,7 +3,6 @@ import os
 import socket
 import sys
 import time
-
 import requests
 from flask import Flask, request, jsonify
 from selenium import webdriver
@@ -19,6 +18,8 @@ logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)])
+
+default_domain = "pq.cloudflareresearch.com"
 
 
 @app.route('/')
@@ -144,7 +145,7 @@ def get_container_ip():
 
 def start_sniffer(os_name: str, browser: str, algo: int, domain: str,
                   duration: int = 30, iface: str = "any",
-                  filter_mode: str = "cloudflare", custom_bpf: str | None = None):
+                  filter_mode: str = "domain", custom_bpf: str | None = None):
     target_ip = get_container_ip()
     logging.debug(f"TARGET_IP is {target_ip}")
     payload = {
@@ -154,6 +155,7 @@ def start_sniffer(os_name: str, browser: str, algo: int, domain: str,
         "container_ip": target_ip,  # this testapp's address on the bridge
         "duration_sec": duration,
         "iface": iface,
+        "domain": domain,
         "split_streams": True,
         "filter_mode": filter_mode,
         "custom_bpf": custom_bpf
@@ -202,8 +204,8 @@ def process_session(browser: str, algo: int, amount: int, domain: str):
             algo=algo,
             duration=30,  # adjust capture window
             iface="eth0",
-            domain="pq.cloudflareresearch.com",
-            filter_mode="cloudflare"
+            domain=domain,
+            filter_mode="domain"
         )
         logging.info(f"Sniffer started: {sniffer_info}")
     except Exception as e:
@@ -251,7 +253,7 @@ def config_handler():
         logging.debug(f"Algo: {algo}")
         amount = int(data['sessions'])
         logging.debug(f"Amount: {amount}")
-        domain = data.get('domain', 'pq.cloudflareresearch.com')
+        domain = data.get('domain', default_domain)
     except (KeyError, ValueError) as e:
         logging.error(f"Bad request: {e}")
         return jsonify({'Error': f'Bad request: {e}'}), 400
