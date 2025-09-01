@@ -9,7 +9,6 @@ services:
     - NET_RAW
     environment:
     - OUTPUT_ROOT=/output
-    - CF_FETCH_ON_START=true
     - LOG_LEVEL=DEBUG
     volumes:
     - ./output:/output
