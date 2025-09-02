@@ -45,6 +45,11 @@ OS_MAP = {"0": "linux", "1": "windows", "2": "macos"}
 ALGO_MAP = {"0": "non-pqc", "1": "kyber", "2": "mlkem"}
 
 
+@app.get("/health")
+def health():
+    return "ok", 200
+
+
 @app.route("/")
 def root():
     logging.debug("Opening the html web")

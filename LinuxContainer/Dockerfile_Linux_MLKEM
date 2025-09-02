@@ -1,0 +1,50 @@
+# ---------- Base ----------
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1
+
+# ---------- System deps ----------
+# Headless Chromium runtime deps (lean but enough for Selenium)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      wget unzip ca-certificates \
+      # common chrome headless deps:
+      fonts-liberation libnss3 libxss1 libatk-bridge2.0-0 libatk1.0-0 \
+      libdrm2 libxshmfence1 libgbm1 libxkbcommon0 libxcomposite1 \
+      libxrandr2 libxdamage1 libasound2 libx11-xcb1 libx11-6 libgtk-3-0 \
+      # network tools you used
+      tshark tcpdump \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------- Chromium 128 + Chromedriver 128 (Chrome for Testing) ----------
+ARG CFT_VER="139.0.7258.155"
+
+# Official CfT URLs (public, no auth)
+ARG CFT_CHROMIUM_URL="https://storage.googleapis.com/chrome-for-testing-public/${CFT_VER}/linux64/chrome-linux64.zip"
+ARG CFT_DRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/${CFT_VER}/linux64/chromedriver-linux64.zip"
+
+RUN set -eux; \
+    # Chromium
+    wget -O /tmp/chromium.zip "$CFT_CHROMIUM_URL"; \
+    unzip /tmp/chromium.zip -d /opt/; \
+    rm -f /tmp/chromium.zip; \
+    # Chromedriver
+    wget -O /tmp/chromedriver.zip "$CFT_DRIVER_URL"; \
+    unzip /tmp/chromedriver.zip -d /opt/; \
+    rm -f /tmp/chromedriver.zip; \
+    # Symlinks for convenience
+    ln -sf /opt/chrome-linux64/chrome /usr/bin/chromium; \
+    ln -sf /opt/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
+
+# Tell your code where to find them
+ENV CHROME_BIN=/usr/bin/chromium \
+    CHROMEDRIVER_PATH=/usr/local/bin/chromedriver
+
+# ---------- App ----------
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+
+EXPOSE 5000
+CMD ["python", "processor.py"]
