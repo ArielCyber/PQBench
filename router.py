@@ -22,20 +22,20 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 
 Containers = {
     # compose service names can be used as hosts
-    "linux_chrome_kyber":  os.getenv("URL_LINUX_CHROME_KYBER",  "http://service-linux-chrome-kyber:8000"),
-    "linux_chrome_mlkem":  os.getenv("URL_LINUX_CHROME_MLKEM",  "http://service-linux-chrome-mlkem:8000"),
-    "linux_firefox_kyber": os.getenv("URL_LINUX_FIREFOX_KYBER", "http://service-linux-firefox-kyber:8000"),
-    "linux_firefox_mlkem": os.getenv("URL_LINUX_FIREFOX_MLKEM", "http://service-linux-firefox-mlkem:8000"),
+    "linux_chrome_kyber":  os.getenv("URL_LINUX_CHROME_KYBER",  "http://service-linux-chrome-kyber:5000"),
+    "linux_chrome_mlkem":  os.getenv("URL_LINUX_CHROME_MLKEM",  "http://service-linux-chrome-mlkem:5000"),
+    "linux_firefox_kyber": os.getenv("URL_LINUX_FIREFOX_KYBER", "http://service-linux-firefox-kyber:5000"),
+    "linux_firefox_mlkem": os.getenv("URL_LINUX_FIREFOX_MLKEM", "http://service-linux-firefox-mlkem:5000"),
 
-    "windows_chrome_kyber": os.getenv("URL_WINDOWS_CHROME_KYBER", "http://service-windows-chrome-kyber:8000"),
-    "windows_chrome_mlkem": os.getenv("URL_WINDOWS_CHROME_MLKEM", "http://service-windows-chrome-mlkem:8000"),
-    "windows_firefox_kyber": os.getenv("URL_WINDOWS_FIREFOX_KYBER", "http://service-windows-firefox-kyber:8000"),
-    "windows_firefox_mlkem": os.getenv("URL_WINDOWS_FIREFOX_MLKEM", "http://service-windows-firefox-mlkem:8000"),
+    "windows_chrome_kyber": os.getenv("URL_WINDOWS_CHROME_KYBER", "http://service-windows-chrome-kyber:5000"),
+    "windows_chrome_mlkem": os.getenv("URL_WINDOWS_CHROME_MLKEM", "http://service-windows-chrome-mlkem:5000"),
+    "windows_firefox_kyber": os.getenv("URL_WINDOWS_FIREFOX_KYBER", "http://service-windows-firefox-kyber:5000"),
+    "windows_firefox_mlkem": os.getenv("URL_WINDOWS_FIREFOX_MLKEM", "http://service-windows-firefox-mlkem:5000"),
 
-    "macos_chrome_kyber":  os.getenv("URL_MACOS_CHROME_KYBER",  "http://service-macos-chrome-kyber:8000"),
-    "macos_chrome_mlkem":  os.getenv("URL_MACOS_CHROME_MLKEM",  "http://service-macos-chrome-mlkem:8000"),
-    "macos_firefox_kyber": os.getenv("URL_MACOS_FIREFOX_KYBER", "http://service-macos-firefox-kyber:8000"),
-    "macos_firefox_mlkem": os.getenv("URL_MACOS_FIREFOX_MLKEM", "http://service-macos-firefox-mlkem:8000"),
+    "macos_chrome_kyber":  os.getenv("URL_MACOS_CHROME_KYBER",  "http://service-macos-chrome-kyber:5000"),
+    "macos_chrome_mlkem":  os.getenv("URL_MACOS_CHROME_MLKEM",  "http://service-macos-chrome-mlkem:5000"),
+    "macos_firefox_kyber": os.getenv("URL_MACOS_FIREFOX_KYBER", "http://service-macos-firefox-kyber:5000"),
+    "macos_firefox_mlkem": os.getenv("URL_MACOS_FIREFOX_MLKEM", "http://service-macos-firefox-mlkem:5000"),
 }
 
 TARGET_ENDPOINT = "/run"
@@ -130,7 +130,7 @@ def config_handler():
         target_base = Containers[target_key].rstrip("/")
         logging.debug("Container chosen to route")
         url = f"{target_base}{TARGET_ENDPOINT}"
-        logging.debug(f"Got the container URL: {url}")
+        logging.debug(f"Got the container key: {target_key}")
 
         # forward info to the chosen container
         info = {
@@ -140,7 +140,9 @@ def config_handler():
             "sessions": sessions
         }
 
+        logging.debug(f"Request sent to: {url}")
         resp = requests.post(url, json=info, timeout=60)
+        logging.debug("Finished the post request")
 
         # relay backend response
         try:
