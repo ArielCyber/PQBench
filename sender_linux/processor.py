@@ -23,7 +23,28 @@ logging.basicConfig(
 default_domain = "pq.cloudflareresearch.com"
 
 
-def _default_gw_ip() -> str | None:
+def _default_gateway_ip() -> str | None:
+    """
+    Discover the default gateway IP address inside a Linux container.
+
+    This function parses `/proc/net/route` to find the kernel's routing
+    table. Each line corresponds to a route entry:
+        - Column 1: interface name
+        - Column 2: destination (hex)
+        - Column 3: gateway (hex)
+    If the destination is `00000000`, it represents the **default route**
+    (i.e., "all traffic not otherwise specified").
+
+    The gateway address is stored in little-endian hexadecimal form.
+    We convert it into a 32-bit integer, then into a human-readable IPv4
+    string using `socket.inet_ntoa`.
+
+    Returns
+    -------
+    str or None
+        The default gateway IPv4 address as a string (e.g. "172.17.0.1"),
+        or None if it cannot be determined.
+    """
     # parse /proc/net/route (little endian hex)
     try:
         with open("/proc/net/route") as f:
@@ -39,21 +60,42 @@ def _default_gw_ip() -> str | None:
 
 
 def resolve_sniffer_url() -> str:
-    # 1) env override
+    """
+    Resolve the URL of the sniffer service, with multiple fallback strategies.
+
+    Priority order:
+    1. **Environment variable** (`SNIFFER_URL`): If set, always use this value.
+    2. **Docker Desktop special DNS name**: Try contacting
+       `http://host.docker.internal:8080/health`. This works when the sniffer
+       runs on the Windows/Mac host and is reachable via Docker Desktop's
+       built-in host alias.
+    3. **Linux container gateway fallback**: If the sniffer is running in
+       `network_mode: host` on the Docker Desktop VM OR Linux host, the correct way to reach
+       it is via the default gateway of the container’s bridge network
+       (determined by `_default_gateway_ip()`).
+    4. **Final fallback**: Default again to
+       `"http://host.docker.internal:8080"` if all else fails.
+
+    Returns
+    -------
+    str
+        The base URL of the sniffer service to contact.
+    """
+    # env override
     env_url = os.getenv("SNIFFER_URL")
     if env_url:
         return env_url
-    # 2) try host.docker.internal first (works on Desktop if service is on the Windows host)
+    # try host.docker.internal first (works on Desktop if service is on the Windows host)
     try:
         requests.get("http://host.docker.internal:8080/health", timeout=1)
         return "http://host.docker.internal:8080"
     except Exception:
         pass
-    # 3) fall back to Docker Desktop VM gateway
-    gw = _default_gw_ip()
+    # fall back to Docker Desktop VM gateway
+    gw = _default_gateway_ip()
     if gw:
         return f"http://{gw}:8080"
-    # 4) final fallback – what you had before
+    # final fallback
     return "http://host.docker.internal:8080"
 
 
