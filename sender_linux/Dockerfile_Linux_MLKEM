@@ -57,7 +57,7 @@ RUN set -eux; \
   && ln -sf /opt/firefox/firefox /usr/local/bin/firefox \
   && rm /tmp/firefox.tar
 
-ENV MODE = "MLKEM"
+ENV MODE="MLKEM"
 
 # ---------- App ----------
 WORKDIR /app
