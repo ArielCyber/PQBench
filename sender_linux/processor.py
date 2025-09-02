@@ -1,6 +1,7 @@
 import logging
 import os
 import socket
+import struct
 import sys
 import time
 import requests
@@ -20,6 +21,44 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)])
 
 default_domain = "pq.cloudflareresearch.com"
+
+
+def _default_gw_ip() -> str | None:
+    # parse /proc/net/route (little endian hex)
+    try:
+        with open("/proc/net/route") as f:
+            next(f)  # header
+            for line in f:
+                parts = line.split()
+                if parts[1] == '00000000':  # default route
+                    gw_hex = parts[2]
+                    gw = socket.inet_ntoa(struct.pack("<L", int(gw_hex, 16)))
+                    return gw
+    except Exception:
+        return None
+
+
+def resolve_sniffer_url() -> str:
+    # 1) env override
+    env_url = os.getenv("SNIFFER_URL")
+    if env_url:
+        return env_url
+    # 2) try host.docker.internal first (works on Desktop if service is on the Windows host)
+    try:
+        requests.get("http://host.docker.internal:8080/health", timeout=1)
+        return "http://host.docker.internal:8080"
+    except Exception:
+        pass
+    # 3) fall back to Docker Desktop VM gateway
+    gw = _default_gw_ip()
+    if gw:
+        return f"http://{gw}:8080"
+    # 4) final fallback – what you had before
+    return "http://host.docker.internal:8080"
+
+
+SNIFFER_URL = resolve_sniffer_url()
+logging.debug(f"SNIFFER_URL is {SNIFFER_URL}")
 
 
 @app.route('/')
@@ -136,15 +175,12 @@ def open_chrome(algo):
         raise BrowserLaunchError("Failed to open Chrome: is Chrome installed and the driver up to date?") from e
 
 
-SNIFFER_URL = os.getenv("SNIFFER_URL", "http://host.docker.internal:8080")
-
-
 def get_container_ip():
     return socket.gethostbyname(socket.gethostname())
 
 
 def start_sniffer(os_name: str, browser: str, algo: int, domain: str,
-                  duration: int = 30, iface: str = "any",
+                  duration: int = 30, iface: str = "pqbench0",
                   filter_mode: str = "domain", custom_bpf: str | None = None):
     target_ip = get_container_ip()
     logging.debug(f"TARGET_IP is {target_ip}")
@@ -203,7 +239,7 @@ def process_session(browser: str, algo: int, amount: int, domain: str):
             browser=browser,
             algo=algo,
             duration=30,  # adjust capture window
-            iface="eth0",
+            iface="pqbench0",
             domain=domain,
             filter_mode="domain"
         )

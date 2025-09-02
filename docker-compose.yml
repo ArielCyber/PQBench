@@ -1,39 +1,63 @@
+version: "3.9"
+
+networks:
+  pqbench:
+    driver: bridge
+    # Give the bridge a stable, known name so the sniffer can target it.
+    driver_opts:
+      com.docker.network.bridge.name: pqbench0
+
 services:
-  sniffer:
+  linux_kyber:
     build:
-      context: .
-    container_name: pqbench-sniffer
-    network_mode: "service:testapp"
-    cap_add:
-    - NET_ADMIN
-    - NET_RAW
-    environment:
-    - OUTPUT_ROOT=/output
-    - LOG_LEVEL=DEBUG
-    volumes:
-    - ./output:/output
-    restart: unless-stopped
-    depends_on:
-    - testapp
-
-
-  testapp:
-    build:
-      context: ./container_test
+      context: ./sender_linux
       dockerfile: Dockerfile_Linux_Kyber
-    container_name: pqbench-testapp
-    ports:
-    - "5002:5000"
-    - "8080:8080"
+    container_name: linux-kyber
     restart: unless-stopped
+    ports:
+      - "5001:5000"
     extra_hosts:
-    - host.docker.internal:host-gateway
+      - host.docker.internal:host-gateway
+    networks: [pqbench]
     healthcheck:
-      test:
-      - CMD-SHELL
-      - curl -fsS http://localhost:5000/health || curl -fsS http://localhost:5000/
-        || exit 1
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health || curl -fsS http://localhost:5000/ || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 5s
+
+  linux_mlkem:
+    build:
+      context: ./sender_linux
+      dockerfile: Dockerfile_Linux_MLKEM
+    container_name: linux-mlkem
+    restart: unless-stopped
+    ports:
+      - "5002:5000"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks: [pqbench]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health || curl -fsS http://localhost:5000/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  sniffer:
+    build:
+      context: ./sniffer
+    container_name: pqbench-sniffer
+    # IMPORTANT: run in host netns so it can see the bridge interface
+    network_mode: host        # Linux only
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+    environment:
+      OUTPUT_ROOT: /output
+      LOG_LEVEL: DEBUG
+      # Tell the sniffer which iface to capture on:
+      IFACE: pqbench0
+    volumes:
+      - ./output:/output
