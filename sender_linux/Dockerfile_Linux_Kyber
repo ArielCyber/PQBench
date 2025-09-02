@@ -40,6 +40,8 @@ RUN set -eux; \
 ENV CHROME_BIN=/usr/bin/chromium \
     CHROMEDRIVER_PATH=/usr/local/bin/chromedriver
 
+ENV MODE = "KYBER"
+
 # ---------- App ----------
 WORKDIR /app
 COPY requirements.txt .
