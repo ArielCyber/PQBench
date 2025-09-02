@@ -1,0 +1,39 @@
+services:
+  sniffer:
+    build:
+      context: .
+    container_name: pqbench-sniffer
+    network_mode: "service:testapp"
+    cap_add:
+    - NET_ADMIN
+    - NET_RAW
+    environment:
+    - OUTPUT_ROOT=/output
+    - LOG_LEVEL=DEBUG
+    volumes:
+    - ./output:/output
+    restart: unless-stopped
+    depends_on:
+    - testapp
+
+
+  testapp:
+    build:
+      context: ./container_test
+      dockerfile: Dockerfile_Linux_Kyber
+    container_name: pqbench-testapp
+    ports:
+    - "5002:5000"
+    - "8080:8080"
+    restart: unless-stopped
+    extra_hosts:
+    - host.docker.internal:host-gateway
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - curl -fsS http://localhost:5000/health || curl -fsS http://localhost:5000/
+        || exit 1
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
