@@ -54,17 +54,9 @@ class StartRequest(BaseModel):
             be filtered (host <container_ip>).
         duration_sec: Capture duration in seconds (1–3600).
         iface: Network interface to capture on. Use ``"any"`` to sniff on all.
-        split_streams: If ``True``, split TCP streams into individual PCAPs
-            with tshark after capture (best effort).
         filter_mode: Filter construction strategy. One of:
             ``"none" | "domain" | "cidr" | "ranges" | "custom"``.
         domain: FQDN to resolve when ``filter_mode="domain"``.
-        cidrs: Comma-separated IPv4/IPv6 CIDR list when
-            ``filter_mode="cidr"`` (e.g., ``"31.13.64.0/18,2a03:2880::/32"``).
-        ranges_v4_url: HTTP(S) URL that returns newline-separated IPv4 CIDRs
-            when ``filter_mode="ranges"``.
-        ranges_v6_url: HTTP(S) URL that returns newline-separated IPv6 CIDRs
-            when ``filter_mode="ranges"``.
         ports: Optional comma-separated TCP ports to AND with the base BPF
             (e.g., ``"443"`` or ``"443,80"``).
         custom_bpf: Full BPF expression when ``filter_mode="custom"``.
@@ -75,18 +67,12 @@ class StartRequest(BaseModel):
     container_ip: IPvAnyAddress = Field(description="Target container IP to sniff")
     duration_sec: int = Field(60, ge=1, le=3600, description="How long to capture")
     iface: Optional[str] = Field(default="any", description="Interface to capture on (default: any)")
-    split_streams: bool = Field(default=True, description="Whether to split TCP streams with tshark")
     filter_mode: constr(strip_whitespace=True) = Field(
         default="domain",
-        description="one of: none | domain | cidr | ranges | custom"
+        description="one of: none | domain | custom"
     )
     domain: Optional[str] = Field(default="pq.cloudflareresearch.com",
                                   description="When filter_mode=domain, FQDN to resolve and filter on")
-    cidrs: Optional[str] = Field(default=None,
-                                 description="Comma-separated CIDRs for filter_mode=cidr,"
-                                             " e.g. '31.13.64.0/18, 2a03:2880::/32'")
-    ranges_v4_url: Optional[str] = Field(default=None, description="HTTP(s) URL returning newline-separated IPv4 CIDRs")
-    ranges_v6_url: Optional[str] = Field(default=None, description="HTTP(s) URL returning newline-separated IPv6 CIDRs")
     ports: Optional[str] = Field(default=None, description="Comma-separated TCP ports to AND with the filter,"
                                                            "e.g. '443,80'")
     custom_bpf: Optional[str] = Field(default=None, description="When filter_mode=custom, full BPF filter")
@@ -224,52 +210,6 @@ def name_dir(os_name: str, browser: str, algo: int) -> str:
     return code
 
 
-def _fetch_ranges(v4_url: Optional[str], v6_url: Optional[str]) -> tuple[List[str], List[str]]:
-    """Fetch newline-separated IPv4/IPv6 CIDR lists from URLs.
-
-    Args:
-        v4_url: HTTP(S) URL for IPv4 CIDRs, or ``None``.
-        v6_url: HTTP(S) URL for IPv6 CIDRs, or ``None``.
-
-    Returns:
-        A tuple ``(v4_cidrs, v6_cidrs)``; empty lists if URLs are ``None`` or on error.
-
-    Notes:
-        Network errors are logged and result in empty output lists.
-    """
-    v4: List[str] = []
-    v6: List[str] = []
-    try:
-        if v4_url:
-            v4 = [x.strip() for x in requests.get(v4_url, timeout=10).text.splitlines() if x.strip()]
-        if v6_url:
-            v6 = [x.strip() for x in requests.get(v6_url, timeout=10).text.splitlines() if x.strip()]
-        log.info("Fetched ranges: ipv4=%d ipv6=%d", len(v4), len(v6))
-        log.debug("Ranges samples v4=%s v6=%s", v4[:5], v6[:5])
-    except Exception as e:
-        log.exception("Failed to fetch ranges: %s", e)
-    return v4, v6
-
-
-def _build_cidr_bpf(container_ip: str, cidrs_v4: List[str], cidrs_v6: List[str]) -> str:
-    """Build a bi-directional BPF limited to a container IP and CIDR ranges.
-
-    Args:
-        container_ip: Target container IP.
-        cidrs_v4: IPv4 CIDR prefixes.
-        cidrs_v6: IPv6 CIDR prefixes.
-
-    Returns:
-        A BPF string combining IPv4/IPv6 clauses. Falls back to ``ip or ip6`` if empty.
-    """
-    v4_parts = [f"(dst net {c} or src net {c})" for c in cidrs_v4]
-    v6_parts = [f"(dst net {c} or src net {c})" for c in cidrs_v6]
-    v4_clause = f"(ip and ({' or '.join(v4_parts)}))" if v4_parts else ""
-    v6_clause = f"(ip6 and ({' or '.join(v6_parts)}))" if v6_parts else ""
-    clause = " or ".join([c for c in [v4_clause, v6_clause] if c]) or "ip or ip6"
-    return f"(host {container_ip}) and ({clause})"
-
-
 def _and_ports(bpf: str, ports_csv: Optional[str]) -> str:
     """AND a TCP port clause with an existing BPF, if ports were supplied.
 
@@ -328,7 +268,7 @@ def _split_streams_tshark(input_pcap: str, output_dir: str):
         log.exception(f"Unexpected error during stream split: {e}")
 
 
-def _capture_job(outfile: str, iface: str, bpf: str, duration: int, do_split: bool, session_dir: str):
+def _capture_job(outfile: str, iface: str, bpf: str, duration: int, session_dir: str):
     """Worker that performs the actual packet capture and optional stream splitting.
 
         Args:
@@ -336,7 +276,6 @@ def _capture_job(outfile: str, iface: str, bpf: str, duration: int, do_split: bo
             iface: Interface passed to Scapy's ``AsyncSniffer`` (e.g., ``"any"`` or ``"eth0"``).
             bpf: Final BPF filter string.
             duration: Capture duration in seconds.
-            do_split: If ``True``, attempt stream splitting with tshark after capture.
             session_dir: Session directory used for derived outputs (e.g., ``streams/``).
 
         Side Effects:
@@ -359,7 +298,7 @@ def _capture_job(outfile: str, iface: str, bpf: str, duration: int, do_split: bo
             log.warning("No packets captured. Check iface/BPF/visibility.")
         wrpcap(outfile, packets)
         log.info(f"Wrote pcap: {outfile} (exists={os.path.exists(outfile)})")
-        if do_split and count > 0:
+        if count > 0:
             _split_streams_tshark(outfile, os.path.join(session_dir, "streams"))
     except Exception as e:
         log.exception(f"Capture job error: {e}")
@@ -392,7 +331,7 @@ def start_capture(request: StartRequest, tasks: BackgroundTasks):
                 * ``409`` if a capture is already running.
                 * ``424`` if domain resolution yields no A/AAAA records.
         """
-    log.debug("/start called with: %s", request.dict())
+    log.debug("/start called with: %s", request.model_dump())
     with _lock:
         if _active["running"]:
             raise HTTPException(status_code=409, detail="A capture is already running")
@@ -420,21 +359,6 @@ def start_capture(request: StartRequest, tasks: BackgroundTasks):
             if not (v4s or v6s):
                 raise HTTPException(status_code=424, detail=f"No A/AAAA records resolved for {request.domain}")
             bpf = _build_domain_bpf(str(request.container_ip), v4s, v6s)
-        elif request.filter_mode == "cidr":
-            if not request.cidrs:
-                raise HTTPException(status_code=400, detail="cidrs required when filter_mode=cidr")
-            # split once, then classify into v4/v6 by presence of ':'
-            raw = [c.strip() for c in request.cidrs.split(",") if c.strip()]
-            v4 = [c for c in raw if ":" not in c]
-            v6 = [c for c in raw if ":" in c]
-            bpf = _build_cidr_bpf(str(request.container_ip), v4, v6)
-        elif request.filter_mode == "ranges":
-            # generic provider via URLs (works for Cloudflare, Facebook, Google, etc.)
-            if not (request.ranges_v4_url or request.ranges_v6_url):
-                raise HTTPException(status_code=400,
-                                    detail="ranges_v4_url and/or ranges_v6_url required when filter_mode=ranges")
-            v4, v6 = _fetch_ranges(request.ranges_v4_url, request.ranges_v6_url)
-            bpf = _build_cidr_bpf(str(request.container_ip), v4, v6)
         elif request.filter_mode == "custom":
             if not request.custom_bpf:
                 raise HTTPException(status_code=400, detail="custom_bpf required when filter_mode=custom")
@@ -451,15 +375,15 @@ def start_capture(request: StartRequest, tasks: BackgroundTasks):
             "target_ip": str(request.container_ip),
             "outfile": outfile
         })
-        log.info("Scheduling capture: iface=%s target=%s duration=%ss split=%s",
-                 request.iface or "any", request.container_ip, request.duration_sec, request.split_streams)
+        log.info("Scheduling capture: iface=%s target=%s duration=%ss",
+                 request.iface or "any", request.container_ip, request.duration_sec)
 
         tasks.add_task(_capture_job, outfile, request.iface or "any", bpf, request.duration_sec,
-                       request.split_streams, session_dir)
+                       session_dir)
 
         response = StartResponse(started=True, session_dir=session_dir, outfile=outfile,
                                  iface=request.iface or "any", bpf=bpf)
-        log.debug("StartResponse: %s", response.dict())
+        log.debug("StartResponse: %s", response.model_dump())
         return response
 
 
