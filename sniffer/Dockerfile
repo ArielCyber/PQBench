@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir fastapi uvicorn[standard] scapy requests
 # App
 WORKDIR /app
 COPY sniffer.py /app/sniffer.py
+COPY sessions.py /app/sessions.py
 
 # Where captures land (mount this as a volume)
 VOLUME ["/output"]

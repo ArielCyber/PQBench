@@ -121,6 +121,7 @@ def root():
     elif algo_mode == "MLKEM":
         logging.debug("Returning mlkem html")
         return app.send_static_file('mlkem_page.html')
+    return None
     # return app.send_static_file('kyber_page.html')
 
 
@@ -231,20 +232,64 @@ def get_container_ip():
 
 def start_sniffer(os_name: str, browser: str, algo: int, domain: str,
                   duration: int = 30, iface: str = "pqbench0",
-                  filter_mode: str = "domain", custom_bpf: str | None = None):
+                  custom_bpf: str | None = None):
     target_ip = get_container_ip()
+
     logging.debug(f"TARGET_IP is {target_ip}")
+    # for temporary testing:
+    #targets = [
+    #     {
+    #         "os": "linux",
+    #         "browser": "chrome",
+    #         "algo": 2,  # MLKEM
+    #         "container_ip": "172.18.0.3" if get_container_ip() == "172.18.0.2" else "172.18.0.2",
+    #         "duration_sec": 30,
+    #         "iface": "pqbench0",
+    #         "filter_mode": "domain",
+    #         "domain": "pq.cloudflareresearch.com",
+    #     },
+    #     {
+    #         "os": "linux",
+    #         "browser": "chrome",
+    #         "algo": 0,  # Non-PQC
+    #         "container_ip": "172.18.0.2" if get_container_ip() == "172.18.0.2" else "172.18.0.3",
+    #         "duration_sec": 30,
+    #         "iface": "pqbench0",
+    #         "filter_mode": "domain",
+    #         "domain": "pq.cloudflareresearch.com",
+    #     },
+    # ]
+
+    # Wrap with a dictionary
+    #payload = {"targets": targets}
+
+    # Better code for the switcher
+    my_ip = get_container_ip()
+    other_ip = "172.18.0.3" if my_ip == "172.18.0.2" else "172.18.0.2"
+
     payload = {
-        "os": os_name,
-        "browser": browser,
-        "algo": algo,  # 1=Non-PQC, 2=Kyber, 3=MLKEM
-        "container_ip": target_ip,  # this testapp's address on the bridge
-        "duration_sec": duration,
-        "iface": iface,
-        "domain": domain,
-        "split_streams": True,
-        "filter_mode": filter_mode,
-        "custom_bpf": custom_bpf
+        "targets": [
+            {
+                "os": os_name,
+                "browser": browser,
+                "algo": algo,
+                "container_ip": my_ip,
+                "duration_sec": duration,
+                "iface": iface,
+                "filter_mode": "domain",
+                "domain": domain,
+            },
+            {
+                "os": os_name,
+                "browser": browser,
+                "algo": algo,
+                "container_ip": other_ip,
+                "duration_sec": duration,
+                "iface": iface,
+                "filter_mode": "domain",
+                "domain": domain,
+            }
+        ]
     }
 
     # tiny retry loop in case sniffer isn’t ready yet
@@ -290,8 +335,7 @@ def process_session(browser: str, algo: int, amount: int, domain: str):
             algo=algo,
             duration=30,  # adjust capture window
             iface="pqbench0",
-            domain=domain,
-            filter_mode="domain"
+            domain=domain
         )
         logging.info(f"Sniffer started: {sniffer_info}")
     except Exception as e:
