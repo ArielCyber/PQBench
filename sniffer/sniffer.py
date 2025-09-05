@@ -4,14 +4,16 @@ import socket
 import subprocess
 import threading
 import time
+import uuid
+from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Optional, List
-import requests
-from fastapi import FastAPI, BackgroundTasks, HTTPException
-from pydantic import BaseModel, Field, IPvAnyAddress, constr
+from fastapi import FastAPI, HTTPException
 from scapy.all import AsyncSniffer, wrpcap, get_if_list  # uses libpcap under the hood
+from sessions import *
+from threading import Event
 
-"""PQBench Sniffer: FastAPI microservice for capturing PCAPs inside a container.
+"""
+PQBench Sniffer: FastAPI microservice for capturing PCAPs inside a container.
 
 Exposes /start, /status, /ifaces, and /health endpoints. Uses Scapy (libpcap)
 to capture packets, builds BPF filters from several modes (none/domain/cidr/
@@ -19,7 +21,7 @@ ranges/custom), can intersect with TCP ports, and optionally splits TCP streams
 with tshark into per-stream PCAPs.
 """
 
-app = FastAPI(title="PQBench Sniffer", version="0.1")
+app = FastAPI(title="PQBench Sniffer", version="0.1.1")
 
 # --------- Logging ----------
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG").upper()
@@ -37,78 +39,11 @@ OUTPUT_ROOT = os.environ.get("OUTPUT_ROOT", "../output")
 # ---------- State ----------
 _lock = threading.Lock()
 _active = {"running": False, "started_at": None, "target_ip": None, "outfile": None}
+# All child sessions keyed by session_id
+_sessions: dict[str, ChildSession] = {}
 
-
-# ---------- Models ----------
-class StartRequest(BaseModel):
-    """Request body for the ``POST /start`` endpoint.
-
-    Attributes:
-        os: Target OS label used in session naming. Accepts ``"linux"``,
-            ``"windows"``, or ``"macos"``.
-        browser: Browser label used in session naming. Accepts ``"chrome"``
-            or ``"firefox"``.
-        algo: Algorithm code used in session naming.
-            ``0`` = Non-PQC, ``1`` = Kyber, ``2`` = MLKEM.
-        container_ip: IP address of the target container whose traffic will
-            be filtered (host <container_ip>).
-        duration_sec: Capture duration in seconds (1–3600).
-        iface: Network interface to capture on. Use ``"any"`` to sniff on all.
-        filter_mode: Filter construction strategy. One of:
-            ``"none" | "domain" | "cidr" | "ranges" | "custom"``.
-        domain: FQDN to resolve when ``filter_mode="domain"``.
-        ports: Optional comma-separated TCP ports to AND with the base BPF
-            (e.g., ``"443"`` or ``"443,80"``).
-        custom_bpf: Full BPF expression when ``filter_mode="custom"``.
-    """
-    os: constr(strip_whitespace=True) = Field(description="linux/windows/macos (for name_dir)")
-    browser: constr(strip_whitespace=True) = Field(description="chrome/firefox (for name_dir)")
-    algo: int = Field(ge=0, le=2, description="0=Non-PQC, 1=Kyber, 2=MLKEM")
-    container_ip: IPvAnyAddress = Field(description="Target container IP to sniff")
-    duration_sec: int = Field(60, ge=1, le=3600, description="How long to capture")
-    iface: Optional[str] = Field(default="any", description="Interface to capture on (default: any)")
-    filter_mode: constr(strip_whitespace=True) = Field(
-        default="domain",
-        description="one of: none | domain | custom"
-    )
-    domain: Optional[str] = Field(default="pq.cloudflareresearch.com",
-                                  description="When filter_mode=domain, FQDN to resolve and filter on")
-    ports: Optional[str] = Field(default=None, description="Comma-separated TCP ports to AND with the filter,"
-                                                           "e.g. '443,80'")
-    custom_bpf: Optional[str] = Field(default=None, description="When filter_mode=custom, full BPF filter")
-
-
-class StartResponse(BaseModel):
-    """Response body returned by ``POST /start``.
-
-    Attributes:
-        started: ``True`` if the capture task was scheduled.
-        session_dir: Absolute path to the created session directory.
-        outfile: Absolute path to the written raw PCAP file.
-        iface: Interface used for capture (resolved from request).
-        bpf: Final BPF string used by the sniffer (after port intersection).
-    """
-    started: bool
-    session_dir: str
-    outfile: str
-    iface: str
-    bpf: str
-
-
-class StatusResponse(BaseModel):
-    """Response body returned by ``GET /status``.
-
-    Attributes:
-        running: Whether a capture is currently in progress.
-        started_at: Epoch seconds (UTC) when the capture began, if running.
-        target_ip: The target container IP associated with the active/last run.
-        outfile: The PCAP path for the active/last run, if available.
-    """
-    running: bool
-    started_at: Optional[float]
-    target_ip: Optional[str]
-    outfile: Optional[str]
-
+# remember the most recent parent run (for convenience in /status)
+_last_parent = {"session_dir": None, "children": []}
 
 # ---------- Helpers ----------
 def _resolve_domain_ips(hostname: str) -> tuple[list[str], list[str]]:
@@ -144,7 +79,7 @@ def _resolve_domain_ips(hostname: str) -> tuple[list[str], list[str]]:
 
 
 def _build_domain_bpf(container_ip: str, domain_v4: List[str], domain_v6: List[str]) -> str:
-    """Build a bi-directional BPF limited to a container IP and a domain's IPs.
+    """Build a bidirectional BPF limited to a container IP and a domain's IPs.
 
     Produces a filter of the form:
     ``(host <container_ip>) and ((ip and (...v4...)) or (ip6 and (...v6...)))``.
@@ -268,123 +203,112 @@ def _split_streams_tshark(input_pcap: str, output_dir: str):
         log.exception(f"Unexpected error during stream split: {e}")
 
 
-def _capture_job(outfile: str, iface: str, bpf: str, duration: int, session_dir: str):
-    """Worker that performs the actual packet capture and optional stream splitting.
-
-        Args:
-            outfile: Destination PCAP path.
-            iface: Interface passed to Scapy's ``AsyncSniffer`` (e.g., ``"any"`` or ``"eth0"``).
-            bpf: Final BPF filter string.
-            duration: Capture duration in seconds.
-            session_dir: Session directory used for derived outputs (e.g., ``streams/``).
-
-        Side Effects:
-            Writes ``outfile`` (PCAP). Optionally writes ``streams/stream-*.pcap``.
-
-        Notes:
-            Any exception during capture is logged; service state is cleaned before exit.
-        """
-    log.info(f"Capture job starting: iface={iface} duration={duration}s outfile={outfile}")
-    log.debug(f"Capture BPF: {bpf}")
+def _capture_job(session_id: str, duration: int, armed_evt: Event | None = None):
+    cs = _sessions.get(session_id)
+    if not cs:
+        return
+    log.info(f"[{session_id}] Capture start: ip={cs.container_ip} iface={cs.iface} outfile={cs.outfile}")
+    log.debug(f"[{session_id}] BPF: {cs.bpf}")
     try:
-        sniffer = AsyncSniffer(iface=iface, filter=bpf, store=True)
+        sniffer = AsyncSniffer(iface=cs.iface, filter=cs.bpf, store=True)
         sniffer.start()
-        log.debug("AsyncSniffer started; sleeping for duration...")
+        if armed_evt is not None:
+            armed_evt.set()  # signal: sniffer armed
         time.sleep(duration)
         packets = sniffer.stop()
-        count = len(packets) if packets is not None else 0
-        log.info(f"Capture stopped. Packets captured: {count}")
-        if count == 0:
-            log.warning("No packets captured. Check iface/BPF/visibility.")
-        wrpcap(outfile, packets)
-        log.info(f"Wrote pcap: {outfile} (exists={os.path.exists(outfile)})")
-        if count > 0:
-            _split_streams_tshark(outfile, os.path.join(session_dir, "streams"))
+        cs.packets = len(packets) if packets is not None else 0
+        if cs.packets == 0:
+            log.warning(f"[{session_id}] 0 packets captured")
+        wrpcap(cs.outfile, packets)
+        log.info(f"[{session_id}] wrote {cs.outfile}")
+        if cs.packets > 0:
+            _split_streams_tshark(cs.outfile, os.path.join(cs.child_dir, "streams"))
     except Exception as e:
-        log.exception(f"Capture job error: {e}")
+        cs.error = str(e)
+        log.exception(f"[{session_id}] capture error: {e}")
     finally:
-        with _lock:
-            _active.update({"running": False, "target_ip": None, "outfile": None, "last_bpf": None})
-        log.debug("Capture job cleaned up state.")
+        cs.done = True
 
 
-@app.post("/start", response_model=StartResponse)
-def start_capture(request: StartRequest, tasks: BackgroundTasks):
-    """Start a capture session.
+@app.post("/start", response_model=StartResponseMulti)
+def start_batch(request: StartBatchRequest):
+    log.debug("/start (batch) called: %s", request.model_dump())
 
-        Validates the request, constructs a BPF per ``filter_mode`` (optionally
-        intersected with ``ports``), prepares a session directory named with the
-        compact UTC timestamp and ``name_dir`` code, and schedules the background
-        capture job.
+    if not request.targets:
+        raise HTTPException(status_code=400, detail="targets must be non-empty")
 
-        Args:
-            request: ``StartRequest`` payload describing capture parameters.
-            tasks: FastAPI background task manager.
+    # one UTC timestamp shared by this batch for easy grouping inside each code
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
-        Returns:
-            ``StartResponse`` containing session metadata and the final BPF.
+    children: list[dict] = []
+    # de-dupe by (ip, code) to avoid double-sniffing the exact same thing in one call
+    seen: set[tuple[str,str]] = set()
 
-        Raises:
-            HTTPException:
-                * ``400`` for invalid parameters (unknown filter_mode, missing
-                  domain/cidrs/ranges/custom_bpf, or invalid iface).
-                * ``409`` if a capture is already running.
-                * ``424`` if domain resolution yields no A/AAAA records.
-        """
-    log.debug("/start called with: %s", request.model_dump())
-    with _lock:
-        if _active["running"]:
-            raise HTTPException(status_code=409, detail="A capture is already running")
+    for t in request.targets:
+        code = name_dir(t.os, t.browser, t.algo)  # e.g., "122"
+        ip = str(t.container_ip)
+        key = (ip, code)
+        if key in seen:
+            log.warning("Skipping duplicate target in batch: ip=%s code=%s", ip, code)
+            continue
+        seen.add(key)
 
-        folder_code = name_dir(request.os, request.browser, request.algo)
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        session_dir = os.path.join(OUTPUT_ROOT, folder_code, f"session-{ts}")
-        os.makedirs(session_dir, exist_ok=True)
-        outfile = os.path.join(session_dir, "raw.pcap")
-        log.debug("Session dir prepared: %s", session_dir)
+        # Validate interface *per target*
+        iface = t.iface or "any"
+        if iface != "any":
+            visible = set(get_if_list())
+            if iface not in visible:
+                raise HTTPException(status_code=400, detail=f"iface '{iface}' not found; available={sorted(visible)}")
 
-        # Check that iface is correct
-        visible = set(get_if_list())
-        chosen = (request.iface or "any")
-        if chosen != "any" and chosen not in visible:
-            raise HTTPException(status_code=400, detail=f"iface '{chosen}' not found; available={sorted(visible)}")
+        # Per-target directory inside its code folder
+        child_dir = os.path.join(OUTPUT_ROOT, code, f"session-{ts}")
+        os.makedirs(child_dir, exist_ok=True)
+        safe_ip = ip.replace(":", "_")
+        outfile = os.path.join(child_dir, f"raw-{safe_ip}.pcap")
 
-        # Build filter
-        if request.filter_mode == "none":
-            bpf = f"(host {request.container_ip}) and (ip or ip6)"
-        elif request.filter_mode == "domain":
-            if not request.domain:
+        # Per-target filter
+        if t.filter_mode == "none":
+            bpf = f"(host {ip}) and (ip or ip6)"
+        elif t.filter_mode == "domain":
+            if not t.domain:
                 raise HTTPException(status_code=400, detail="domain required when filter_mode=domain")
-            v4s, v6s = _resolve_domain_ips(request.domain)
+            v4s, v6s = _resolve_domain_ips(t.domain)
             if not (v4s or v6s):
-                raise HTTPException(status_code=424, detail=f"No A/AAAA records resolved for {request.domain}")
-            bpf = _build_domain_bpf(str(request.container_ip), v4s, v6s)
-        elif request.filter_mode == "custom":
-            if not request.custom_bpf:
+                raise HTTPException(status_code=424, detail=f"No A/AAAA records resolved for {t.domain}")
+            bpf = _build_domain_bpf(ip, v4s, v6s)
+        elif t.filter_mode == "custom":
+            if not t.custom_bpf:
                 raise HTTPException(status_code=400, detail="custom_bpf required when filter_mode=custom")
-            bpf = f"(host {request.container_ip}) and ({request.custom_bpf})"
-
+            bpf = f"(host {ip}) and ({t.custom_bpf})"
         else:
             raise HTTPException(status_code=400, detail="unknown filter_mode")
+        bpf = _and_ports(bpf, t.ports)
 
-        bpf = _and_ports(bpf, request.ports)
-        # Mark active and launch background capture
-        _active.update({
-            "running": True,
-            "started_at": time.time(),
-            "target_ip": str(request.container_ip),
-            "outfile": outfile
-        })
-        log.info("Scheduling capture: iface=%s target=%s duration=%ss",
-                 request.iface or "any", request.container_ip, request.duration_sec)
+        # Register session
+        sid = uuid.uuid4().hex[:12]
+        cs = ChildSession(
+            session_id=sid,
+            container_ip=ip,
+            code=code,
+            child_dir=child_dir,
+            outfile=outfile,
+            iface=iface,
+            bpf=bpf,
+            started_at=time.time(),
+            duration_sec=t.duration_sec,
+        )
+        with _lock:
+            _sessions[sid] = cs
 
-        tasks.add_task(_capture_job, outfile, request.iface or "any", bpf, request.duration_sec,
-                       session_dir)
+        # Start thread and wait until "armed"
+        armed = Event()
+        threading.Thread(target=_capture_job, args=(sid, t.duration_sec, armed), daemon=True).start()
+        if not armed.wait(timeout=2.0):
+            log.warning("Sniffer %s did not arm within 2s (iface=%s, outfile=%s)", sid, iface, outfile)
 
-        response = StartResponse(started=True, session_dir=session_dir, outfile=outfile,
-                                 iface=request.iface or "any", bpf=bpf)
-        log.debug("StartResponse: %s", response.model_dump())
-        return response
+        children.append(asdict(cs))
+
+    return StartResponseMulti(started=True, children=children)
 
 
 # ---------- Lifespan: logs interfaces at startup ----------
@@ -421,11 +345,9 @@ def list_ifaces() -> List[str]:
     return ifaces
 
 
-@app.get("/status", response_model=StatusResponse)
+@app.get("/status", response_model=StatusAllResponse)
 def status():
     with _lock:
-        log.debug(f"/status -> active={_active}")
-        return StatusResponse(running=_active["running"],
-                              started_at=_active["started_at"],
-                              target_ip=_active["target_ip"],
-                              outfile=_active["outfile"])
+        return StatusAllResponse(
+            sessions=[asdict(cs) for cs in _sessions.values()]
+        )
