@@ -1,36 +1,38 @@
 services:
-  router:
+  switcher:
     build: .
-    image: router:latest
-    ports: ["5000:5000"]   # expose router to host
+    image: switcher:latest
+    command: >
+      gunicorn -w 2 -k gthread --threads 4 -t 120 -b 0.0.0.0:5000
+      --access-logfile - --error-logfile -
+      switcher:app
+
+    ports: ["5000:5000"]
     environment:
-      URL_LINUX_CHROME_KYBER: http://linux-kyber:5000
-      URL_LINUX_CHROME_MLKEM: http://linux-mlkem:5000
-      URL_LINUX_FIREFOX_KYBER: http://linux-kyber-firefox:5000
-      URL_LINUX_FIREFOX_MLKEM: http://linux-mlkem-firefox:5000
-    networks: [appnet]
+      URL_LINUX_KYBER: http://linux-kyber:5000
+      URL_LINUX_MLKEM: http://linux-mlkem:5000
+      # add the rest when they are ready
     depends_on:
-      linux-kyber:
-        condition: service_healthy
-      linux-mlkem:
-        condition: service_healthy
+      linux-kyber: { condition: service_healthy }
+      linux-mlkem: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
-      interval: 10s
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/health"]
+      interval: 60s
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    networks: [appnet]
 
   linux-kyber:
     build:
       context: ./LinuxContainer
       dockerfile: Dockerfile_Linux_Kyber
     image: linux-ck:latest
-    expose: ["5000"]     # available on the compose network only
+    expose: ["5000"]   # internal-only
     networks: [appnet]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
-      interval: 10s
+      interval: 60s
       timeout: 3s
       retries: 5
     restart: unless-stopped
@@ -44,10 +46,24 @@ services:
     networks: [appnet]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
-      interval: 10s
+      interval: 60s
       timeout: 3s
       retries: 5
     restart: unless-stopped
+
+  agent-worker:
+    build:
+      context: ./Agent
+      dockerfile: Dockerfile_Agent    # <- this is the agent Dockerfile above
+    image: my-agent:latest
+    environment:
+      ENTRY_CONTROLLER_URL: "http://switcher:5000/config"
+      INTERVAL_SEC: "60"        # change cadence if you want
+    depends_on:
+      switcher:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [appnet]
 
 networks:
   appnet:

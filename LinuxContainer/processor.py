@@ -178,7 +178,7 @@ def process_session(browser: str, algo: int, amount: int, domain: str):
     return {"status": "done"}
 
 
-@app.route('/config', methods=['POST'])
+@app.route('/execute', methods=['POST'])
 def config_handler():
     """
     Flask endpoint to initiate a PQClass session based on client config.

@@ -22,23 +22,17 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 
 Containers = {
     # compose service names can be used as hosts
-    "linux_chrome_kyber":  os.getenv("URL_LINUX_CHROME_KYBER",  "http://service-linux-chrome-kyber:5000"),
-    "linux_chrome_mlkem":  os.getenv("URL_LINUX_CHROME_MLKEM",  "http://service-linux-chrome-mlkem:5000"),
-    "linux_firefox_kyber": os.getenv("URL_LINUX_FIREFOX_KYBER", "http://service-linux-firefox-kyber:5000"),
-    "linux_firefox_mlkem": os.getenv("URL_LINUX_FIREFOX_MLKEM", "http://service-linux-firefox-mlkem:5000"),
+    "linux_kyber":  os.getenv("URL_LINUX_KYBER",  "http://linux-kyber:5000"),
+    "linux_mlkem":  os.getenv("URL_LINUX_MLKEM",  "http://linux-mlkem:5000"),
 
-    "windows_chrome_kyber": os.getenv("URL_WINDOWS_CHROME_KYBER", "http://service-windows-chrome-kyber:5000"),
-    "windows_chrome_mlkem": os.getenv("URL_WINDOWS_CHROME_MLKEM", "http://service-windows-chrome-mlkem:5000"),
-    "windows_firefox_kyber": os.getenv("URL_WINDOWS_FIREFOX_KYBER", "http://service-windows-firefox-kyber:5000"),
-    "windows_firefox_mlkem": os.getenv("URL_WINDOWS_FIREFOX_MLKEM", "http://service-windows-firefox-mlkem:5000"),
+    "windows_kyber": os.getenv("URL_WINDOWS_KYBER", "http://windows-kyber:5000"),
+    "windows_mlkem": os.getenv("URL_WINDOWS_MLKEM", "http://windows-mlkem:5000"),
 
-    "macos_chrome_kyber":  os.getenv("URL_MACOS_CHROME_KYBER",  "http://service-macos-chrome-kyber:5000"),
-    "macos_chrome_mlkem":  os.getenv("URL_MACOS_CHROME_MLKEM",  "http://service-macos-chrome-mlkem:5000"),
-    "macos_firefox_kyber": os.getenv("URL_MACOS_FIREFOX_KYBER", "http://service-macos-firefox-kyber:5000"),
-    "macos_firefox_mlkem": os.getenv("URL_MACOS_FIREFOX_MLKEM", "http://service-macos-firefox-mlkem:5000"),
+    "macos_kyber":  os.getenv("URL_MACOS_KYBER",  "http://macos-kyber:5000"),
+    "macos_mlkem":  os.getenv("URL_MACOS_MLKEM",  "http://macos-mlkem:5000"),
 }
 
-TARGET_ENDPOINT = "/run"
+TARGET_ENDPOINT = "/execute"
 
 # map keys to values
 OS_MAP = {"0": "linux", "1": "windows", "2": "macos"}
@@ -56,7 +50,7 @@ def root():
     return app.send_static_file("main_page.html")
 
 
-def choose_container(opsys: str, browser: str, algo: str) -> str:
+def choose_container(opsys: str, algo: str) -> str:
     """
     Chooses a container to activate the recording.
     :param opsys: the operating system to record - Linux | Windows | MacOS
@@ -65,9 +59,8 @@ def choose_container(opsys: str, browser: str, algo: str) -> str:
     :return: a key to the right container based on the given arguments.
     """
     opsys = opsys.lower()
-    browser = browser.lower()
     algo = algo.lower()
-    logging.debug("os: " + opsys + " browser: " + browser + " algorithm: " + algo)
+    logging.debug("os: " + opsys + " algorithm: " + algo)
     if algo == "kyber" or algo == "non-pqc":
         algorithm = "kyber"
     elif algo == "mlkem":
@@ -78,7 +71,7 @@ def choose_container(opsys: str, browser: str, algo: str) -> str:
     # algorithm = "kyber" if algo == "non-pqc" or algo == "kyber" else "mlkem"
 
     # activate the desired container
-    key = f"{opsys}_{browser}_{algorithm}"
+    key = f"{opsys}_{algorithm}"
     logging.debug("The chosen container: " + key)
 
     # make sure that such container exists
@@ -92,57 +85,69 @@ def choose_container(opsys: str, browser: str, algo: str) -> str:
 def config_handler():
     """
     Gets recording characteristics information from the webUI or the agent by a POST request.
-    :return: a json with the recording information to the right container to navigate to.
+    :return: a JSON with the recording information to the right container to navigate to.
     """
-    data = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True) or {}
+
+    # --- helpers to normalize inputs ---
+    def norm_os(v):
+        if v is None:
+            return None
+        s = str(v).strip().lower()
+        return OS_MAP.get(s, s)  # convert code "0"->"linux", or keep "linux" as is
+
+    def norm_algo(v):
+        if v is None:
+            return None
+        s = str(v).strip().lower()
+        return ALGO_MAP.get(s, s)  # convert code "1"->"kyber", or keep "kyber" as is
+
+    def norm_browser(v):
+        if v is None:
+            return None
+        return str(v).strip().lower()
+
+    # --- accept both "operationSystem" and "os" ---
+    os_raw = payload.get("operationSystem", payload.get("os"))
+    browser = norm_browser(payload.get("browser"))
+    algo_raw = payload.get("algorithm")
+    sessions_raw = payload.get("sessions")
 
     try:
-        # get values from html request
-        os_code = str(data.get("operationSystem")).lower()
-        browser = str(data["browser"]).lower()
-        algo_code = str(data["algorithm"]).lower()
-        sessions = int(data["sessions"])
-        logging.debug(f"Values from json POST request: {os_code}, {browser}, {algo_code}, {sessions}")
+        opsys = norm_os(os_raw)
+        algo = norm_algo(algo_raw)
+        sessions = int(sessions_raw) if sessions_raw is not None else 0
+        logging.debug(f"Values from JSON POST request: {opsys}, {browser}, {algo}, {sessions}")
 
-    except (KeyError, ValueError, TypeError) as e:
+    except (ValueError, TypeError) as e:
         return jsonify({"error": f"Bad request: {e}"}), 400
 
-    # map values by keys
-    opsys = OS_MAP.get(os_code)
-    algo = ALGO_MAP.get(algo_code)
-
-    # validate inputs
+    # --- validate inputs ---
     if opsys not in {"linux", "windows", "macos"}:
-        return jsonify({"error": "Invalid operating system"}), 401
-
+        return jsonify({"error": "Invalid operating system"}), 400
     elif browser not in {"chrome", "firefox"}:
-        return jsonify({"error": "Invalid web browser"}), 401
-
+        return jsonify({"error": "Invalid web browser"}), 400
     elif algo not in {"kyber", "mlkem", "non-pqc"}:
-        return jsonify({"error": "Invalid algorithm"}), 401
-
+        return jsonify({"error": "Invalid algorithm"}), 400
     elif sessions <= 0:
-        return jsonify({"error": "Invalid number of captures"}), 401
+        return jsonify({"error": "Invalid number of captures"}), 400
 
     try:
-        target_key = choose_container(opsys, browser, algo)
+        target_key = choose_container(opsys, algo)
         logging.debug("Key to the right container chosen")
         target_base = Containers[target_key].rstrip("/")
-        logging.debug("Container chosen to route")
-        url = f"{target_base}{TARGET_ENDPOINT}"
-        logging.debug(f"Got the container key: {target_key}")
+        url = f"{target_base}{TARGET_ENDPOINT}"  # e.g. container_name/run
 
         # forward info to the chosen container
         info = {
             "os": opsys,
             "browser": browser,
-            "algorithm": algo,
+            "algorithm": algo_raw,
             "sessions": sessions
         }
 
         logging.debug(f"Request sent to: {url}")
         resp = requests.post(url, json=info, timeout=60)
-        logging.debug("Finished the post request")
 
         # relay backend response
         try:
@@ -152,7 +157,6 @@ def config_handler():
                 "backend_status": resp.status_code,
                 "backend_response": backend_json
             }), resp.status_code
-
         except ValueError:
             return jsonify({
                 "routed_to": target_key,
@@ -161,8 +165,7 @@ def config_handler():
             }), resp.status_code
 
     except requests.RequestException as e:
-        return jsonify({"error": f"Router couldn't reach backend: {e}"}), 502
-
+        return jsonify({"error": f"Switcher couldn't reach backend: {e}"}), 502
     except Exception as e:
         app.logger.exception(e)
         return jsonify({"error": "Unexpected server error"}), 500
