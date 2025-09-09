@@ -180,9 +180,8 @@ def open_firefox(algo):
         logging.debug("Set PQC on")
 
     try:
-        gecko_path = GeckoDriverManager().install()
-        logging.debug("Installed GeckoDriverManager successfully!")
-        return webdriver.Firefox(service=FirefoxService(gecko_path), options=firefox_opts, )
+        service = FirefoxService()  # no executable_path
+        return webdriver.Firefox(service=service, options=firefox_opts)
     except WebDriverException as e:
         logging.critical(e)
         raise BrowserLaunchError("Failed to open Firefox: is Firefox installed and the driver up to date?") from e
