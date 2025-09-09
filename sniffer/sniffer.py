@@ -11,6 +11,8 @@ from fastapi import FastAPI, HTTPException
 from scapy.all import AsyncSniffer, wrpcap, get_if_list  # uses libpcap under the hood
 from sessions import *
 from threading import Event
+import json
+from shutil import which
 
 """
 PQBench Sniffer: FastAPI microservice for capturing PCAPs inside a container.
@@ -44,6 +46,7 @@ _sessions: dict[str, ChildSession] = {}
 
 # remember the most recent parent run (for convenience in /status)
 _last_parent = {"session_dir": None, "children": []}
+
 
 # ---------- Helpers ----------
 def _resolve_domain_ips(hostname: str) -> tuple[list[str], list[str]]:
@@ -167,34 +170,129 @@ def _and_ports(bpf: str, ports_csv: Optional[str]) -> str:
     return f"({bpf}) and {port_clause}"
 
 
-def _split_streams_tshark(input_pcap: str, output_dir: str):
-    """Split TCP streams from a PCAP into per-stream PCAP files using tshark.
+def _split_streams_tshark(input_pcap: str, output_dir: str, dir_code, timestamp, *, min_packets: int = 30,
+                          require_serverhello: bool = True, require_appdata: bool = False,
+                          force_tls_port: str | None = "443", ):  # set None to skip decode-as
+    """
+    Split only the *meaningful* TLS TCP streams from a PCAP using tshark.
 
-        Extracts unique ``tcp.stream`` IDs, then writes each stream to
-        ``<output_dir>/stream-<id>.pcap``.
+    Rules:
+      - Stream must contain a ClientHello (tls.handshake.type==1)
+      - If require_serverhello: must also contain a ServerHello (type==2)
+      - Stream must have >= min_packets TCP frames
+      - If require_appdata: must contain TLS application data (content_type==23)
 
-        Args:
-            input_pcap: Path to the input PCAP file.
-            output_dir: Directory to write per-stream files into (created if missing).
+    Outputs:
+      <output_dir>/stream-<sid>.pcap for each kept stream
+      <output_dir>/_streams_debug.json with selection reasons
+    """
 
-        Side Effects:
-            Writes ``stream-*.pcap`` files to ``output_dir``.
-
-        Notes:
-            If tshark is not installed, a warning is logged and splitting is skipped.
-        """
     try:
         os.makedirs(output_dir, exist_ok=True)
-        cmd_list_ids = ["tshark", "-r", input_pcap, "-T", "fields", "-e", "tcp.stream", "-Y", "tcp"]
-        log.debug(f"Splitting streams: listing IDs with: {' '.join(cmd_list_ids)}")
-        out = subprocess.check_output(cmd_list_ids, text=True)
-        stream_ids = sorted(set([s for s in out.splitlines() if s.strip() != ""]))
-        log.info(f"Streams found: {len(stream_ids)}")
-        for sid in stream_ids:
-            stream_out = os.path.join(output_dir, f"stream-{sid}.pcap")
-            cmd_extract = ["tshark", "-r", input_pcap, "-w", stream_out, "-Y", f"tcp.stream=={sid}"]
-            log.debug(f"Extracting stream {sid} -> {stream_out} | cmd={' '.join(cmd_extract)}")
+        # dbg is just a debug information accumulator — a dictionary that collects
+        # all the reasoning about which streams were kept or dropped and why.
+        dbg = {
+            "input": input_pcap,
+            "min_packets": min_packets,
+            "require_serverhello": require_serverhello,
+            "require_appdata": require_appdata,
+            "force_tls_port": force_tls_port,
+            "steps": [],
+            "kept": [],
+            "dropped": []
+        }
+
+        def step(name, **k):
+            dbg["steps"].append({"name": name, **k})
+
+        if which("tshark") is None:
+            log.warning("tshark not found; skipping stream split")
+            return
+
+        decode = []
+        if force_tls_port:
+            decode = ["-d", f"tcp.port=={force_tls_port},ssl"]
+            step("decode-as", args=decode)
+
+        # Find all streams that contain a ClientHello (candidate set)
+        cmd_ch = ["tshark", "-r", input_pcap, *decode,
+                  "-Y", "tls.handshake.type==1",
+                  "-T", "fields", "-e", "tcp.stream"]
+        step("cmd_clienthellos", cmd=cmd_ch)
+        out_ch = subprocess.check_output(cmd_ch, text=True)
+        cand_streams = sorted({s for s in out_ch.splitlines() if s.strip().isdigit()})
+        step("clienthello_streams", count=len(cand_streams), sample=cand_streams[:50])
+
+        kept_ids: list[str] = []
+        for sid in cand_streams:
+            reasons = []
+
+            # Must contain a ServerHello
+            has_sh = True
+            if require_serverhello:
+                cmd_sh = ["tshark", "-r", input_pcap, *decode,
+                          "-Y", f"tcp.stream=={sid} && tls.handshake.type==2",
+                          "-c", "1"]
+                rc_sh = subprocess.run(cmd_sh, check=False,
+                                       stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL).returncode
+                has_sh = (rc_sh == 0)
+                if not has_sh:
+                    reasons.append("no_serverhello")
+
+            # Count TCP frames on the stream
+            cmd_cnt = ["tshark", "-r", input_pcap,
+                       "-Y", f"tcp.stream=={sid} && tcp",
+                       "-T", "fields", "-e", "frame.number"]
+            out_cnt = subprocess.check_output(cmd_cnt, text=True)
+            pkt_count = sum(1 for ln in out_cnt.splitlines() if ln.strip())
+            if pkt_count < min_packets:
+                reasons.append(f"too_few_packets({pkt_count})")
+
+            # Require TLS AppData frames
+            has_app = True
+            if require_appdata:
+                cmd_app = ["tshark", "-r", input_pcap, *decode,
+                           "-Y", f"tcp.stream=={sid} && tls.record.content_type==23",
+                           "-c", "1"]
+                rc_app = subprocess.run(cmd_app, check=False,
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL).returncode
+                has_app = (rc_app == 0)
+                if not has_app:
+                    reasons.append("no_appdata")
+
+            if has_sh and pkt_count >= min_packets and has_app:
+                kept_ids.append(sid)
+                dbg["kept"].append({"sid": sid, "pkt_count": pkt_count})
+            else:
+                dbg["dropped"].append({"sid": sid, "pkt_count": pkt_count, "reasons": reasons})
+
+        # Extract kept streams
+        index = 0
+        for sid in kept_ids:
+            basename = f"session-{dir_code}-{timestamp}-{index:02d}.pcap"  # <-- no leading slash
+            stream_out = os.path.join(output_dir, basename)  # <-- proper join
+            index += 1
+
+            # extra safety: ensure parent exists (in case output_dir was changed upstream)
+            os.makedirs(os.path.dirname(stream_out), exist_ok=True)
+
+            cmd_extract = [
+                "tshark", "-r", input_pcap,
+                *(["-d", f"tcp.port=={force_tls_port},ssl"] if force_tls_port else []),
+                "-w", stream_out,
+                "-Y", f"tcp.stream=={sid}"
+            ]
+            log.debug("Extracting stream %s -> %s | cmd=%s", sid, stream_out, " ".join(cmd_extract))
             subprocess.run(cmd_extract, check=False)
+
+        # Persist debug info
+        with open(os.path.join(output_dir, "_streams_debug.json"), "w", encoding="utf-8") as f:
+            json.dump(dbg, f, indent=2)
+
+        log.info("Streams kept: %d | dropped: %d", len(kept_ids), len(dbg["dropped"]))
+
     except FileNotFoundError:
         log.warning("tshark not found; skipping stream split")
     except subprocess.CalledProcessError as e:
@@ -203,31 +301,41 @@ def _split_streams_tshark(input_pcap: str, output_dir: str):
         log.exception(f"Unexpected error during stream split: {e}")
 
 
-def _capture_job(session_id: str, duration: int, armed_evt: Event | None = None):
-    cs = _sessions.get(session_id)
-    if not cs:
+def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | None = None):
+    child_session = _sessions.get(session_id)
+    if not child_session:
         return
-    log.info(f"[{session_id}] Capture start: ip={cs.container_ip} iface={cs.iface} outfile={cs.outfile}")
-    log.debug(f"[{session_id}] BPF: {cs.bpf}")
+    log.info(
+        f"[{session_id}] Capture start: ip={child_session.container_ip} iface={child_session.iface} outfile={child_session.outfile}")
+    log.debug(f"[{session_id}] BPF: {child_session.bpf}")
     try:
-        sniffer = AsyncSniffer(iface=cs.iface, filter=cs.bpf, store=True)
+        sniffer = AsyncSniffer(iface=child_session.iface, filter=child_session.bpf, store=True)
         sniffer.start()
         if armed_evt is not None:
             armed_evt.set()  # signal: sniffer armed
         time.sleep(duration)
         packets = sniffer.stop()
-        cs.packets = len(packets) if packets is not None else 0
-        if cs.packets == 0:
+        child_session.packets = len(packets) if packets is not None else 0
+        if child_session.packets == 0:
             log.warning(f"[{session_id}] 0 packets captured")
-        wrpcap(cs.outfile, packets)
-        log.info(f"[{session_id}] wrote {cs.outfile}")
-        if cs.packets > 0:
-            _split_streams_tshark(cs.outfile, os.path.join(cs.child_dir, "streams"))
+        wrpcap(child_session.outfile, packets)
+        log.info(f"[{session_id}] wrote {child_session.outfile}")
+        if child_session.packets > 0:
+            _split_streams_tshark(
+                input_pcap=child_session.outfile,
+                output_dir=os.path.join(child_session.child_dir, "streams"),  # e.g. /output/120/session-.../streams
+                dir_code=child_session.code,  # e.g. "120"
+                timestamp=timestamp,
+                min_packets=30,
+                require_serverhello=True,
+                require_appdata=False,
+                force_tls_port="443",
+            )
     except Exception as e:
-        cs.error = str(e)
+        child_session.error = str(e)
         log.exception(f"[{session_id}] capture error: {e}")
     finally:
-        cs.done = True
+        child_session.done = True
 
 
 @app.post("/start", response_model=StartResponseMulti)
@@ -238,15 +346,15 @@ def start_batch(request: StartBatchRequest):
         raise HTTPException(status_code=400, detail="targets must be non-empty")
 
     # one UTC timestamp shared by this batch for easy grouping inside each code
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
 
     children: list[dict] = []
     # de-dupe by (ip, code) to avoid double-sniffing the exact same thing in one call
-    seen: set[tuple[str,str]] = set()
+    seen: set[tuple[str, str]] = set()
 
-    for t in request.targets:
-        code = name_dir(t.os, t.browser, t.algo)  # e.g., "122"
-        ip = str(t.container_ip)
+    for target in request.targets:
+        code = name_dir(target.os, target.browser, target.algo)  # e.g., "122"
+        ip = str(target.container_ip)
         key = (ip, code)
         if key in seen:
             log.warning("Skipping duplicate target in batch: ip=%s code=%s", ip, code)
@@ -254,35 +362,35 @@ def start_batch(request: StartBatchRequest):
         seen.add(key)
 
         # Validate interface *per target*
-        iface = t.iface or "any"
+        iface = target.iface or "any"
         if iface != "any":
             visible = set(get_if_list())
             if iface not in visible:
                 raise HTTPException(status_code=400, detail=f"iface '{iface}' not found; available={sorted(visible)}")
 
         # Per-target directory inside its code folder
-        child_dir = os.path.join(OUTPUT_ROOT, code, f"session-{ts}")
+        child_dir = os.path.join(OUTPUT_ROOT, code, f"session-{timestamp}")
         os.makedirs(child_dir, exist_ok=True)
         safe_ip = ip.replace(":", "_")
         outfile = os.path.join(child_dir, f"raw-{safe_ip}.pcap")
 
         # Per-target filter
-        if t.filter_mode == "none":
+        if target.filter_mode == "none":
             bpf = f"(host {ip}) and (ip or ip6)"
-        elif t.filter_mode == "domain":
-            if not t.domain:
+        elif target.filter_mode == "domain":
+            if not target.domain:
                 raise HTTPException(status_code=400, detail="domain required when filter_mode=domain")
-            v4s, v6s = _resolve_domain_ips(t.domain)
+            v4s, v6s = _resolve_domain_ips(target.domain)
             if not (v4s or v6s):
-                raise HTTPException(status_code=424, detail=f"No A/AAAA records resolved for {t.domain}")
+                raise HTTPException(status_code=424, detail=f"No A/AAAA records resolved for {target.domain}")
             bpf = _build_domain_bpf(ip, v4s, v6s)
-        elif t.filter_mode == "custom":
-            if not t.custom_bpf:
+        elif target.filter_mode == "custom":
+            if not target.custom_bpf:
                 raise HTTPException(status_code=400, detail="custom_bpf required when filter_mode=custom")
-            bpf = f"(host {ip}) and ({t.custom_bpf})"
+            bpf = f"(host {ip}) and ({target.custom_bpf})"
         else:
             raise HTTPException(status_code=400, detail="unknown filter_mode")
-        bpf = _and_ports(bpf, t.ports)
+        bpf = _and_ports(bpf, target.ports)
 
         # Register session
         sid = uuid.uuid4().hex[:12]
@@ -295,14 +403,15 @@ def start_batch(request: StartBatchRequest):
             iface=iface,
             bpf=bpf,
             started_at=time.time(),
-            duration_sec=t.duration_sec,
+            duration_sec=target.duration_sec,
+            session_count=getattr(target, "session_count", 1),
         )
         with _lock:
             _sessions[sid] = cs
 
         # Start thread and wait until "armed"
         armed = Event()
-        threading.Thread(target=_capture_job, args=(sid, t.duration_sec, armed), daemon=True).start()
+        threading.Thread(target=_capture_job, args=(sid, target.duration_sec, timestamp, armed), daemon=True).start()
         if not armed.wait(timeout=2.0):
             log.warning("Sniffer %s did not arm within 2s (iface=%s, outfile=%s)", sid, iface, outfile)
 

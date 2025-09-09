@@ -12,12 +12,13 @@ class TargetSpec(BaseModel):
     os: constr(strip_whitespace=True) = Field(description="linux/windows/macos")
     browser: constr(strip_whitespace=True) = Field(description="chrome/firefox")
     algo: int = Field(ge=0, le=2, description="0=Non-PQC, 1=Kyber, 2=MLKEM")
+    session_count: int = Field(1, ge=1, le=1000, description="Number of independent recordings to make")
 
     # capture identity
     container_ip: IPvAnyAddress
 
     # capture options (per-target)
-    duration_sec: int = Field(60, ge=1, le=3600)
+    duration_sec: int = Field(5, ge=1, le=3600)
     iface: Optional[str] = "any"
 
     # filter options (per-target)
@@ -47,6 +48,7 @@ class ChildSession:
     bpf: str
     started_at: float
     duration_sec: int
+    session_count: int = 1
     done: bool = False
     packets: int = 0
     error: Optional[str] = None

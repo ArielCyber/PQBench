@@ -230,43 +230,17 @@ def get_container_ip():
     return socket.gethostbyname(socket.gethostname())
 
 
-def start_sniffer(os_name: str, browser: str, algo: int, domain: str,
-                  duration: int = 30, iface: str = "pqbench0",
+def start_sniffer(os_name: str, browser: str, algo: int, domain: str, sessions: int,
+                  duration: int = 10, iface: str = "pqbench0",
                   custom_bpf: str | None = None):
     target_ip = get_container_ip()
 
     logging.debug(f"TARGET_IP is {target_ip}")
-    # for temporary testing:
-    #targets = [
-    #     {
-    #         "os": "linux",
-    #         "browser": "chrome",
-    #         "algo": 2,  # MLKEM
-    #         "container_ip": "172.18.0.3" if get_container_ip() == "172.18.0.2" else "172.18.0.2",
-    #         "duration_sec": 30,
-    #         "iface": "pqbench0",
-    #         "filter_mode": "domain",
-    #         "domain": "pq.cloudflareresearch.com",
-    #     },
-    #     {
-    #         "os": "linux",
-    #         "browser": "chrome",
-    #         "algo": 0,  # Non-PQC
-    #         "container_ip": "172.18.0.2" if get_container_ip() == "172.18.0.2" else "172.18.0.3",
-    #         "duration_sec": 30,
-    #         "iface": "pqbench0",
-    #         "filter_mode": "domain",
-    #         "domain": "pq.cloudflareresearch.com",
-    #     },
-    # ]
-
-    # Wrap with a dictionary
-    #payload = {"targets": targets}
 
     # Better code for the switcher
     my_ip = get_container_ip()
     other_ip = "172.18.0.3" if my_ip == "172.18.0.2" else "172.18.0.2"
-
+    duration = int(duration + sessions * 3)
     payload = {
         "targets": [
             {
@@ -278,16 +252,7 @@ def start_sniffer(os_name: str, browser: str, algo: int, domain: str,
                 "iface": iface,
                 "filter_mode": "domain",
                 "domain": domain,
-            },
-            {
-                "os": os_name,
-                "browser": browser,
-                "algo": algo,
-                "container_ip": other_ip,
-                "duration_sec": duration,
-                "iface": iface,
-                "filter_mode": "domain",
-                "domain": domain,
+                "session_count": sessions,
             }
         ]
     }
@@ -332,8 +297,8 @@ def process_session(browser: str, algo: int, amount: int, domain: str):
         sniffer_info = start_sniffer(
             os_name="linux",  # or detect dynamically
             browser=browser,
+            sessions=amount,
             algo=algo,
-            duration=30,  # adjust capture window
             iface="pqbench0",
             domain=domain
         )
