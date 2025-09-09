@@ -229,17 +229,47 @@ def get_container_ip():
     return socket.gethostbyname(socket.gethostname())
 
 
+def _measure_one_session(browser: str, algo: int, domain: str) -> float:
+    """
+    Measure one session performance. To estimate the runtime for the whole recording
+    Parameters
+    ----------
+    browser
+    algo
+    domain
+
+    Returns
+    -------
+
+    """
+    t0 = time.monotonic()
+    d = open_browser(browser, algo)
+    try:
+        d.get(f"https://{domain}")
+        WebDriverWait(d, 10).until(lambda drv: drv.execute_script("return document.readyState") == "complete")
+        time.sleep(3)
+    finally:
+        d.quit()
+
+    logging.debug(f"Session time: {time.monotonic() - t0}")
+    return time.monotonic() - t0
+
+
 def start_sniffer(os_name: str, browser: str, algo: int, domain: str, sessions: int,
-                  duration: int = 10, iface: str = "pqbench0",
-                  custom_bpf: str | None = None):
+                  duration: int = 10, iface: str = "pqbench0"):
     target_ip = get_container_ip()
 
     logging.debug(f"TARGET_IP is {target_ip}")
 
+    # measure once, then scale
+    per = max(_measure_one_session(browser, algo, domain), 5.0)  # never assume <5s
+    safety = float(os.getenv("SNIFFER_DURATION_SAFETY", "1.3"))  # tweakable
+    total = int(duration + per * sessions * safety)
+    logging.debug(f"Total duration time: {total}")
+
     # Better code for the switcher
     my_ip = get_container_ip()
     other_ip = "172.18.0.3" if my_ip == "172.18.0.2" else "172.18.0.2"
-    duration = int(duration + sessions * 3)
     payload = {
         "targets": [
             {
@@ -247,7 +277,7 @@ def start_sniffer(os_name: str, browser: str, algo: int, domain: str, sessions: 
                 "browser": browser,
                 "algo": algo,
                 "container_ip": my_ip,
-                "duration_sec": duration,
+                "duration_sec": total,
                 "iface": iface,
                 "filter_mode": "domain",
                 "domain": domain,
