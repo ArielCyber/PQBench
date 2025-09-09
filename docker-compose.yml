@@ -2,6 +2,7 @@ services:
   switcher:
     build: .
     image: switcher:latest
+    container_name: switcher_container
     command: >
       gunicorn -w 2 -k gthread --threads 4 -t 120 -b 0.0.0.0:5000
       --access-logfile - --error-logfile -
@@ -12,9 +13,18 @@ services:
       URL_LINUX_KYBER: http://linux-kyber:5000
       URL_LINUX_MLKEM: http://linux-mlkem:5000
       # add the rest when they are ready
+      # ... your existing URLs ...
+      SNIFFER_URL: "http://sniffer:8080"
+      SNIFFER_IFACE: "pqbench0"                # optional, matches your sniffer env
+      SNIFFER_FILTER_MODE: "domain"            # or "none"/"custom"
+      SNIFFER_DOMAIN: "pq.cloudflareresearch.com"
+      SNIFFER_PORTS: "443"
+      SNIFFER_DURATION_SEC: "30"
+
     depends_on:
       linux-kyber: { condition: service_healthy }
       linux-mlkem: { condition: service_healthy }
+      sniffer: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:5000/health"]
       interval: 60s
@@ -28,6 +38,7 @@ services:
       context: ./LinuxContainer
       dockerfile: Dockerfile_Linux_Kyber
     image: linux-ck:latest
+    container_name: linux_kyber_container
     expose: ["5000"]   # internal-only
     networks: [appnet]
     healthcheck:
@@ -42,6 +53,7 @@ services:
       context: ./LinuxContainer
       dockerfile: Dockerfile_Linux_MLKEM
     image: linux-cm:latest
+    container_name: linux_mlkem_container
     expose: ["5000"]
     networks: [appnet]
     healthcheck:
@@ -55,7 +67,8 @@ services:
     build:
       context: ./Agent
       dockerfile: Dockerfile_Agent    # <- this is the agent Dockerfile above
-    image: my-agent:latest
+    image: agent:latest
+    container_name: agent_container
     environment:
       ENTRY_CONTROLLER_URL: "http://switcher:5000/config"
       INTERVAL_SEC: "60"        # change cadence if you want
@@ -65,7 +78,31 @@ services:
     restart: unless-stopped
     networks: [appnet]
 
+  sniffer:
+    build:
+      context: ./Sniffer/sniffer
+    container_name: sniffer_container
+    # REMOVE: network_mode: host
+    networks: [ appnet ]
+    ports: [ "8080:8080" ]     # expose to host (optional)
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+    environment:
+      OUTPUT_ROOT: /output
+      LOG_LEVEL: DEBUG
+      IFACE: eth0
+    volumes:
+      - ./output:/output
+    healthcheck:
+      test: [ "CMD", "curl", "-fsS", "http://localhost:8080/health" ]
+      interval: 60s
+      timeout: 3s
+      retries: 5
+
 networks:
   appnet:
     name: shared-appnet
     driver: bridge
+
