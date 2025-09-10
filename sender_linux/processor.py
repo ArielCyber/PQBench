@@ -234,13 +234,13 @@ def _measure_one_session(browser: str, algo: int, domain: str) -> float:
     Measure one session performance. To estimate the runtime for the whole recording
     Parameters
     ----------
-    browser
-    algo
-    domain
+    browser - the browser to measure
+    algo - which algorithm to use
+    domain - the domain to connect to
 
     Returns
     -------
-
+    The time it takes for one session to complete
     """
     t0 = time.monotonic()
     d = open_browser(browser, algo)
