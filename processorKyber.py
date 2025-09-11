@@ -95,7 +95,6 @@ def open_chrome(algo):
     chrome_opts.add_argument("--disable-gpu")  # Windows workaround
     chrome_opts.add_argument("--disable-dev-shm-usage")
     chrome_opts.add_argument("--remote-debugging-port=0")  # avoids DevTools port collision
-    chrome_opts.binary_location = r"C:\Program Files\chrome-win64\chrome.exe"
 
     prefs = {"browser": {"enabled_labs_experiments": []}}
 

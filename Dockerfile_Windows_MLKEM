@@ -52,7 +52,7 @@ EXPOSE 5000
 #########################################################################################################
 #########################################################################################################
 
-COPY Start.ps1 C:/scripts/Start.ps1
+COPY oem/kyber/Start.ps1 C:/scripts/Start.ps1
 
 # This ENV is passed to Start.ps1 to 'tell it' which script to run
 ENV PROCESS_SCRIPT=processorMLKEM.py

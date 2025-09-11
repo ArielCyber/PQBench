@@ -1,14 +1,57 @@
-version: "3.9"
-
 services:
-  pqbench_windows_mlkem:
-    build:
-      context: .
-      dockerfile: Dockerfile_Windows_MLKEM
-    container_name: pqbench_windows_mlkem
+  # Windows VM that will run processorKyber
+  win-kyber:
+    image: dockurr/windows
+    container_name: win-kyber
+    environment:
+      VERSION: "11"           # Win11 Pro
+      RAM_SIZE: "8G"
+      CPU_CORES: "2"
+      USERNAME: "Docker"      # default user (can change)
+      PASSWORD: "admin"       # default pass (can change)
+      # Optional: give Windows its own L2 IP later (see macvlan note)
+      # DHCP: "Y"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8006:8006"           # web viewer (install phase / emergency)
+      - "5003:5000"           # Flask inside Windows -> exposed as 5001 on host/network
+    volumes:
+      - ./oem/kyber:/oem      # auto-run installer at first boot
+      - ./:/data              # shows up inside Windows as \\host.lan\Data
+    restart: unless-stopped
+    stop_grace_period: 2m
+    networks:
+      - pqbench-win
 
-  pqbench_windows_kyber:
-    build:
-      context: .
-      dockerfile: Dockerfile_Windows_Kyber
-    container_name: pqbench_windows_kyber
+  # Windows VM that will run processorMLKEM
+  win-mlkem:
+    image: dockurr/windows
+    container_name: win-mlkem
+    environment:
+      VERSION: "11"
+      RAM_SIZE: "8G"
+      CPU_CORES: "2"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8007:8006"
+      - "5004:5000"
+    volumes:
+      - ./oem/mlkem:/oem
+      - ./:/data
+    restart: unless-stopped
+    stop_grace_period: 2m
+    networks:
+      - pqbench-win
+
+
+networks:
+  pqbench-win:
+    driver: bridge
