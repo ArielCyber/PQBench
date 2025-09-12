@@ -37,7 +37,7 @@ services:
       VERSION: "11"
       RAM_SIZE: "8G"
       CPU_CORES: "2"
-      ARGUMENTS: "-cpu host,arch_capabilities=off"
+      ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to boot consistently: https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
     devices:
       - /dev/kvm
       - /dev/net/tun
