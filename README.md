@@ -7,7 +7,7 @@ This project allows running a macOS Big Sur container inside Docker to perform P
 ## Installation and Usage Steps
 
 ### 1. Install macOS Big Sur in Docker
-Run the following command once to pull and start macOS Big Sur in a new container:
+Run the following command once to pull and start macOS Big Sur in a new Docker container(*Using Docker-OSX):
 
 ```bash
 docker run -it \
@@ -28,8 +28,14 @@ docker start -ai mymac
 ---
 
 ### 2. Project Directory
-Inside the macOS container, go to the project directory (e.g., `~/pqcMac`).  
-It should contain the following files:
+Inside the macOS container, clone the correct branch from the repository:
+
+```bash
+git clone -b MacOS-Container https://github.com/ArielCyber/PQBench.git
+cd PQBench
+```
+
+The project directory should contain the following files:
 
 - `setup.sh` – one-time installation script  
 - `run.sh` – script to start the server  
