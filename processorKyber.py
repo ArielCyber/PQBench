@@ -167,9 +167,17 @@ def root():
     Returns
     -------
     Response
-        The contents of 'main_page.html' from the static folder.
+        The contents of 'mlkem_page.html' from the static folder.
     """
-    return app.send_static_file('main_page.html')
+    algo_mode = os.getenv("MODE")
+    logging.debug(f"ALGO MODE is {algo_mode}")
+    if algo_mode == "KYBER":
+        logging.debug("Returning kyber html")
+        return app.send_static_file('kyber_page.html')
+    elif algo_mode == "MLKEM":
+        logging.debug("Returning mlkem html")
+        return app.send_static_file('mlkem_page.html')
+    return None
 
 
 @app.route('/config', methods=['POST'])

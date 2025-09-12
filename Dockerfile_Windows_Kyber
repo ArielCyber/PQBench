@@ -36,6 +36,8 @@ RUN Expand-Archive C:\temp\chrome.zip -DestinationPath 'C:\Program Files' ; `
 # Firefox
 RUN choco install firefox --version=130.0.1 --ignore-checksum --params '"/NoTaskbarShortcut /NoDesktopShortcut /NoStartMenuShortcut /NoAutoUpdate"'
 
+ENV MODE="KYBER"
+
 # App files
 WORKDIR C:/app/
 COPY . C:/app/
