@@ -1,10 +1,11 @@
+# Estimated install + boot time - 15~ minutes
 services:
   # Windows VM that will run processorKyber
   win-kyber:
     image: dockurr/windows
     container_name: win-kyber
     environment:
-      VERSION: "11"           # Win11 Pro
+      VERSION: "2025"
       EDITION: "core"
       RAM_SIZE: "6G"
       CPU_CORES: "2"
@@ -35,7 +36,7 @@ services:
     image: dockurr/windows
     container_name: win-mlkem
     environment:
-      VERSION: "11"
+      VERSION: "2025"
       RAM_SIZE: "6G"
       EDITION: "core"
       CPU_CORES: "2"
