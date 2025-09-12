@@ -1,4 +1,5 @@
-# Estimated install + boot time - 15~ minutes
+# Estimated first install + boot time - 25~ minutes
+# Estimated non first time startup - 1.5~ minutes
 services:
   # Windows VM that will run processorKyber
   win-kyber:
