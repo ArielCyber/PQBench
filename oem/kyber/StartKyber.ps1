@@ -1,3 +1,19 @@
+# Prevent system from sleeping (requires admin privileges)
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class SleepUtil {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern uint SetThreadExecutionState(uint esFlags);
+}
+"@
+
+# Flags:
+# ES_CONTINUOUS = 0x80000000
+# ES_SYSTEM_REQUIRED = 0x00000001
+# ES_DISPLAY_REQUIRED = 0x00000002
+[void][SleepUtil]::SetThreadExecutionState(0x80000001 -bor 0x80000002)
+
 # Make sure TLS/WinGet/Choco-ready
 Set-ExecutionPolicy Bypass -Scope LocalMachine -Force
 
@@ -31,3 +47,6 @@ Register-ScheduledTask -TaskName "PQBench-Kyber" -Action $action -Trigger $trigg
 
 # Start now (first boot) so the service is up without reboot
 Start-Process -FilePath "C:\pqbench-venv\Scripts\python.exe" -ArgumentList "`"$repo\processorKyber.py`"" -WindowStyle Minimized
+
+# Allow sleep again
+[void][SleepUtil]::SetThreadExecutionState(0x80000000)
