@@ -15,6 +15,9 @@ $keepAwakeJob = Start-Job {
 try {
 # ------------------- Main Work (BEGIN) -------------------
 
+    # Handle Chrome
+    .\FontsToAdd\Add-Font.ps1 FontsToAdd\Fonts
+
     # Install Chocolatey (stable way to get Python/Chrome/Firefox)
     # If you already keep a local bootstrap, you can replace this with winget.
     $env:chocolateyUseWindowsCompression = 'true'
@@ -45,6 +48,8 @@ try {
     Register-ScheduledTask -TaskName "PQBench-MLKEM" -Action $action -Trigger $trigger -User "Docker" -Password "admin" -RunLevel Highest -Force
 
     $env:MODE = "MLKEM"
+
+    & "c:\Program Files (x86)\Google\Chrome\Application\chrome.exe" --headless --disable-gpu --no-sandbox --enable-logging --print-to-pdf="C:/export/pdftest.pdf" https://www.google.com
 
     # Start now (first boot) so the service is up without reboot
     Start-Process -FilePath "C:\pqbench-venv\Scripts\python.exe" -ArgumentList "`"$repo\processorMLKEM.py`"" -WindowStyle Minimized
