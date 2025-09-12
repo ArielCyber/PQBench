@@ -11,6 +11,7 @@ services:
       PASSWORD: "admin"       # default pass (can change)
       # Optional: give Windows its own L2 IP later (see macvlan note)
       # DHCP: "Y"
+      ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to work : https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
     devices:
       - /dev/kvm
       - /dev/net/tun
@@ -22,6 +23,7 @@ services:
     volumes:
       - ./oem/kyber:/oem      # auto-run installer at first boot
       - ./:/data              # shows up inside Windows as \\host.lan\Data
+      - ./windows-kyber:/storage
     restart: unless-stopped
     stop_grace_period: 2m
     networks:
@@ -35,6 +37,7 @@ services:
       VERSION: "11"
       RAM_SIZE: "8G"
       CPU_CORES: "2"
+      ARGUMENTS: "-cpu host,arch_capabilities=off"
     devices:
       - /dev/kvm
       - /dev/net/tun
@@ -46,6 +49,7 @@ services:
     volumes:
       - ./oem/mlkem:/oem
       - ./:/data
+      - ./windows-mlkem:/storage
     restart: unless-stopped
     stop_grace_period: 2m
     networks:
