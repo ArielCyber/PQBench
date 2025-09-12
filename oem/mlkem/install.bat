@@ -1,15 +1,19 @@
 @echo off
-rem This runs at the END of the automated Windows install inside dockur/windows.
+setlocal
+set "LOG=C:\OEM\install.log"
 
-:: Copy the script we want to run every boot to a stable path
-copy /Y "C:\OEM\install.bat" "C:\OEM\install-on-boot.cmd"
+>>"%LOG%" echo ==== install.bat START %DATE% %TIME% ====
 
-:: Create/replace a Startup task that runs as SYSTEM at every boot
+copy /Y "C:\OEM\install.bat" "C:\OEM\install-on-boot.cmd" >>"%LOG%" 2>&1
 schtasks /Create /F ^
   /TN "PQBench-InstallAtBoot" ^
   /TR "cmd /C C:\OEM\install-on-boot.cmd" ^
   /SC ONSTART ^
-  /RU "SYSTEM"
+  /RU SYSTEM >>"%LOG%" 2>&1
 
 rem 1) Enable PowerShell script execution for our bootstrap
-powershell -NoProfile -ExecutionPolicy Bypass -File "C:\OEM\StartMLKEM.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\OEM\StartMLKEM.ps1" >>"%LOG%" 2>&1
+set "RC=%ERRORLEVEL%"
+
+>>"%LOG%" echo ==== install.bat END %DATE% %TIME% RC=%RC% ====
+endlocal & exit /b %RC%
