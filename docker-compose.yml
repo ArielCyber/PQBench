@@ -5,7 +5,7 @@ services:
     container_name: win-kyber
     environment:
       VERSION: "11"           # Win11 Pro
-      RAM_SIZE: "8G"
+      RAM_SIZE: "6G"
       CPU_CORES: "2"
       USERNAME: "Docker"      # default user (can change)
       PASSWORD: "admin"       # default pass (can change)
@@ -35,7 +35,7 @@ services:
     container_name: win-mlkem
     environment:
       VERSION: "11"
-      RAM_SIZE: "8G"
+      RAM_SIZE: "6G"
       CPU_CORES: "2"
       ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to boot consistently: https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
     devices:
