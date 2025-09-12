@@ -44,14 +44,14 @@ try {
     netsh advfirewall firewall add rule name="PQBench Flask" dir=in action=allow protocol=TCP localport=5000
 
     # Create a Scheduled Task to run the KYBER processor at boot (as the default Docker user)
-    $action  = New-ScheduledTaskAction -Execute "C:\pqbench-venv\Scripts\python.exe" -Argument "`"$repo\processorKyber.py`""
+    $action  = New-ScheduledTaskAction -Execute "C:\pqbench-venv\Scripts\python.exe" -Argument "`"$repo\processor.py`""
     $trigger = New-ScheduledTaskTrigger -AtStartup
     Register-ScheduledTask -TaskName "PQBench-Kyber" -Action $action -Trigger $trigger -User "Docker" -Password "admin" -RunLevel Highest -Force
 
     $env:MODE = "KYBER"
 
     # Start now (first boot) so the service is up without reboot
-    Start-Process -FilePath "C:\pqbench-venv\Scripts\python.exe" -ArgumentList "`"$repo\processorKyber.py`"" -WindowStyle Minimized
+    Start-Process -FilePath "C:\pqbench-venv\Scripts\python.exe" -ArgumentList "`"$repo\processor.py`"" -WindowStyle Minimized
 
 # ------------------- Main Work (END) -------------------
 }

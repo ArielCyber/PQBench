@@ -39,11 +39,11 @@ try {
     $env:MODE = "MLKEM"
     [Environment]::SetEnvironmentVariable('MODE','MLKEM','Machine')  # for the task at next boot
 
-    $action  = New-ScheduledTaskAction -Execute "C:\pqbench-venv\Scripts\python.exe" -Argument "`"$repo\processorMLKEM.py`""
+    $action  = New-ScheduledTaskAction -Execute "C:\pqbench-venv\Scripts\python.exe" -Argument "`"$repo\processor.py`""
     $trigger = New-ScheduledTaskTrigger -AtStartup
     Register-ScheduledTask -TaskName "PQBench-MLKEM" -Action $action -Trigger $trigger -User "Docker" -Password "admin" -RunLevel Highest -Force
 
-    Start-Process -FilePath "C:\pqbench-venv\Scripts\python.exe" -ArgumentList "`"$repo\processorMLKEM.py`"" -WindowStyle Minimized
+    Start-Process -FilePath "C:\pqbench-venv\Scripts\python.exe" -ArgumentList "`"$repo\processor.py`"" -WindowStyle Minimized
     # ------------------- Main Work (END) -------------------
 }
 finally {

@@ -3,7 +3,7 @@ import os
 import sys
 import winreg
 from pathlib import Path
-
+from logging.handlers import RotatingFileHandler
 from flask import Flask, request, jsonify
 from selenium import webdriver
 from selenium.common import WebDriverException
@@ -15,10 +15,20 @@ from webdriver_manager.firefox import GeckoDriverManager
 
 app = Flask(__name__)
 
+log_path = os.getenv("PY_LOG_FILE", r"C:\OEM\processor.log")
+Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+
+handlers = [
+    logging.StreamHandler(sys.stdout),
+    RotatingFileHandler(log_path, maxBytes=10_000_000, backupCount=5, encoding="utf-8")
+]
+
 logging.basicConfig(
     level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)])
+    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d in %(funcName)s() - %(message)s",
+    handlers=handlers,
+    force=True,
+)
 
 
 def open_browser(browser: str, algo: int):
@@ -100,12 +110,11 @@ def open_chrome(algo):
     # ----- Chrome PQC experiments (via Local State "enabled_labs_experiments") -----
     if algo == 0:
         prefs["browser"]["enabled_labs_experiments"] = [
-            "enable-tls13-kyber@2",
-            "use-ml-kem@2"]
+            "enable-tls13-kyber@2"]
 
     elif algo == 1:
         prefs["browser"]["enabled_labs_experiments"] = [
-            "use-ml-kem@2"]
+            "enable-tls13-kyber@1"]
     elif algo == 2:  # ML-KEM
         prefs["browser"]["enabled_labs_experiments"] = [
             "enable-tls13-kyber@2",  # Disabled
@@ -115,7 +124,13 @@ def open_chrome(algo):
     chrome_opts.add_experimental_option("localState", prefs)
 
     try:
-        chromedriver_path = ChromeDriverManager().install()
+        algo_mode = os.getenv("MODE")
+        if algo_mode == "KYBER":
+            chromedriver_path = ChromeDriverManager(driver_version="128.0.6613.138").install()
+        elif algo_mode == "MLKEM":
+            chromedriver_path = ChromeDriverManager(driver_version="139.0.7258.155").install()
+        else:
+            raise RuntimeError("MODE env variable must be 'KYBER' or 'MLKEM'")
         service = ChromeService(executable_path=chromedriver_path)
         return webdriver.Chrome(options=chrome_opts, service=service)
     except WebDriverException as e:
