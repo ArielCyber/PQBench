@@ -27,9 +27,9 @@ def root():
     Returns
     -------
     Response
-        The contents of 'main_page.html' from the static folder.
+        The contents of 'kyber_page.html' from the static folder.
     """
-    return app.send_static_file('main_page.html')
+    return app.send_static_file('kyber_page.html')
 
 
 def open_browser(browser: str, algo: int):
@@ -94,19 +94,21 @@ def open_firefox(algo):
         else:
             firefox_path = "/Applications/Firefox 142.app/Contents/MacOS/firefox"
 
+        # ✅ הגדרה נכונה של binary_location
+        firefox_opts.binary_location = firefox_path
+
         gecko_path = GeckoDriverManager().install()
         logging.debug(f"Using Firefox binary at: {firefox_path}")
         logging.debug("Installed GeckoDriverManager successfully!")
 
+        # ❌ אל תעביר firefox_binary=...
         return webdriver.Firefox(
             service=FirefoxService(gecko_path),
-            options=firefox_opts,
-            firefox_binary=firefox_path
+            options=firefox_opts
         )
     except WebDriverException as e:
         logging.critical(e)
         raise BrowserLaunchError("Failed to open Firefox: is Firefox installed and the driver up to date?") from e
-
 
 
 def open_chrome(algo):
@@ -131,16 +133,16 @@ def open_chrome(algo):
         # Non-PQC or Kyber-only — use Chrome 128
         prefs["browser"]["enabled_labs_experiments"] = [
             "enable-tls13-kyber@2",  # explicitly disabled
-            "use-ml-kem@2"           # explicitly disabled
+            "use-ml-kem@2"  # explicitly disabled
         ]
-        chrome_path = "/Applications/Google Chrome 128.app/Contents/MacOS/Google Chrome"
+        chrome_path = "/Applications/Google Chrome 128.app/Contents/MacOS/Google Chrome for Testing"
     elif algo == 2:
         # ML-KEM (PQC) — use Chrome 138
         prefs["browser"]["enabled_labs_experiments"] = [
             "enable-tls13-kyber@2",  # explicitly disabled
-            "use-ml-kem@1"           # enabled
+            "use-ml-kem@1"  # enabled
         ]
-        chrome_path = "/Applications/Google Chrome 138.app/Contents/MacOS/Google Chrome"
+        chrome_path = "/Applications/Google Chrome 138.app/Contents/MacOS/Google Chrome for Testing"
     else:
         raise ValueError(f"Unknown algorithm value: {algo}")
 
@@ -154,7 +156,6 @@ def open_chrome(algo):
     except WebDriverException as e:
         logging.critical(e)
         raise BrowserLaunchError("Failed to open Chrome: is Chrome installed and the driver up to date?") from e
-
 
 
 def process_session(browser: str, algo: int, amount: int, domain: str):
@@ -254,3 +255,6 @@ class BrowserLaunchError(RuntimeError):
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+
+
+

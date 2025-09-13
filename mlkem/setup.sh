@@ -23,7 +23,7 @@ pip install -r requirements.txt
 
 # Install Chrome 138
 CHROME_VERSION="138.0.7204.183"
-APP_NAME="Google Chrome 128.app"
+APP_NAME="Google Chrome 138.app"
 URL="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/${CHROME_ARCH}/chrome-${CHROME_ARCH}.zip"
 
 if [ ! -d "/Applications/$APP_NAME" ]; then
@@ -37,8 +37,9 @@ else
   echo "Chrome version $CHROME_VERSION already installed."
 fi
 
-# ChromeDriver 128
+# ChromeDriver 138
 DRIVER_PATH="/usr/local/bin/chromedriver-${CHROME_VERSION}"
+SYMLINK_PATH="/usr/local/bin/chromedriver"
 if [[ ! -f "$DRIVER_PATH" ]]; then
   echo "Installing ChromeDriver version $CHROME_VERSION..."
   ZIP_NAME="chromedriver-${CHROME_ARCH}.zip"
@@ -52,26 +53,29 @@ else
   echo "ChromeDriver version $CHROME_VERSION already installed."
 fi
 
-# Firefox 130.0.1
-FIREFOX_APP="/Applications/Firefox.app"
-if [ ! -d "$FIREFOX_APP" ]; then
-  echo "Downloading Firefox 130.0.1..."
-  if [[ "$ARCH" == "arm64" ]]; then
-    FIREFOX_URL="https://download.mozilla.org/?product=firefox-142.0.1-ssl&os=osx&lang=en-US"
-  else
-    FIREFOX_URL="https://download.mozilla.org/?product=firefox-142.0.1-ssl&os=osx&lang=en-US&type=dmg"
-  fi
-  curl -L -o firefox.dmg "$FIREFOX_URL"
-  echo "Mounting Firefox..."
-  hdiutil attach firefox.dmg -nobrowse
-  echo "Copying Firefox to /Applications..."
-  cp -r /Volumes/Firefox/Firefox.app /Applications/
-  echo "Unmounting Firefox..."
-  hdiutil detach /Volumes/Firefox
-  echo "Cleaning up..."
-  rm -f firefox.dmg
+# Create or update symlink to match processor.py default path
+if [[ ! -L "$SYMLINK_PATH" || "$(readlink $SYMLINK_PATH)" != "$DRIVER_PATH" ]]; then
+  echo "Linking $SYMLINK_PATH to $DRIVER_PATH..."
+  sudo ln -sf "$DRIVER_PATH" "$SYMLINK_PATH"
 else
-  echo "Firefox already installed."
+  echo "Symlink for ChromeDriver already correct."
+fi
+
+# Install Firefox 142
+FIREFOX_VERSION="142.0.1"
+FIREFOX_APP_NAME="Firefox 142.app"
+FIREFOX_URL="https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/mac/${CHROME_ARCH}/en-US/Firefox%20${FIREFOX_VERSION}.dmg"
+
+if [ ! -d "/Applications/$FIREFOX_APP_NAME" ]; then
+  echo "Installing Firefox $FIREFOX_VERSION..."
+  curl -L -o firefox.dmg "$FIREFOX_URL"
+  hdiutil attach firefox.dmg
+  cp -r "/Volumes/Firefox/Firefox.app" "$FIREFOX_APP_NAME"
+  hdiutil detach "/Volumes/Firefox"
+  sudo mv "$FIREFOX_APP_NAME" "/Applications/"
+  rm firefox.dmg
+else
+  echo "Firefox $FIREFOX_VERSION already installed."
 fi
 
 # Geckodriver
