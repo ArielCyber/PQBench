@@ -88,14 +88,18 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
       continue
     fi
 
-    unzip -q "chromedriver-${VERSION}.zip"
-    sudo mv chromedriver "$DRIVER_PATH"
-    sudo chmod +x "$DRIVER_PATH"
-    rm -f "chromedriver-${VERSION}.zip"
+  unzip -q "chromedriver-${VERSION}.zip"
 
-    echo "ChromeDriver for Chrome $VERSION installed at $DRIVER_PATH"
+  # אם יש תיקייה בשם chromedriver_mac64 (כמו בקובץ של Huawei)
+  if [[ -d chromedriver_mac64 ]]; then
+    sudo mv chromedriver_mac64/chromedriver "$DRIVER_PATH"
+    rm -rf chromedriver_mac64
+  # אחרת נניח שהקובץ הגיע ישירות (כמו בקבצי zip הישנים מ-Google)
+  elif [[ -f chromedriver ]]; then
+    sudo mv chromedriver "$DRIVER_PATH"
   else
-    echo "ChromeDriver for Chrome $VERSION already exists at $DRIVER_PATH"
+    echo "❌ לא נמצא קובץ chromedriver לאחר unzip עבור גרסה $VERSION"
+    continue
   fi
 done
 
