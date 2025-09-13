@@ -4,7 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="cf6a7724-a771-4b0b-ab60-4e871226e0b5" name="Changes" comment="updated PQC/NonPQC support" />
+    <list default="true" id="cf6a7724-a771-4b0b-ab60-4e871226e0b5" name="Changes" comment="updated PQC/NonPQC support">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kyber/setup.sh" beforeDir="false" afterPath="$PROJECT_DIR$/kyber/setup.sh" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -69,7 +72,7 @@
       <option name="presentableId" value="Default" />
       <updated>1757451469127</updated>
       <workItem from="1757451470233" duration="21873000" />
-      <workItem from="1757777126348" duration="1031000" />
+      <workItem from="1757777126348" duration="2607000" />
     </task>
     <task id="LOCAL‎-00001" summary="update README">
       <option name="closed" value="true" />
@@ -183,7 +186,15 @@
       <option name="project" value="LOCAL‎" />
       <updated>1757777587032</updated>
     </task>
-    <option name="localTasksCounter" value="15" />
+    <task id="LOCAL‎-00015" summary="updated PQC/NonPQC support">
+      <option name="closed" value="true" />
+      <created>1757778389876</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL‎-00015" />
+      <option name="project" value="LOCAL‎" />
+      <updated>1757778389876</updated>
+    </task>
+    <option name="localTasksCounter" value="16" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
