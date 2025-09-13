@@ -68,13 +68,20 @@ done
 
 # Step 5: Install ChromeDrivers for all Chrome versions defined
 for VERSION in "${CHROME_VERSIONS[@]}"; do
-  DRIVER_VERSION="${VERSION}.0.0"
+  DRIVER_VERSION="${VERSION}.0.6613.137"
   DRIVER_PATH="/usr/local/bin/chromedriver-${VERSION}"
 
   if [[ ! -f "$DRIVER_PATH" ]]; then
     echo "Installing ChromeDriver $DRIVER_VERSION for Chrome $VERSION..."
 
-    curl -L -o "chromedriver-${VERSION}.zip" "https://storage.googleapis.com/chrome-for-testing-public/${DRIVER_VERSION}/${CHROME_ARCH}/chromedriver-${CHROME_ARCH}.zip"
+    # קבע ארכיטקטורה לפי הפלטפורמה
+    if [[ $(uname -m) == "arm64" ]]; then
+      ARCH="mac-arm64"
+    else
+      ARCH="mac-x64"
+    fi
+
+    curl -L -o "chromedriver-${VERSION}.zip" "https://repo.huaweicloud.com/chromedriver/${DRIVER_VERSION}/chromedriver-${ARCH}.zip"
 
     if [[ $? -ne 0 ]]; then
       echo "Failed to download ChromeDriver for version $VERSION. Skipping..."
@@ -82,15 +89,16 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
     fi
 
     unzip -q "chromedriver-${VERSION}.zip"
-    sudo mv "chromedriver-${CHROME_ARCH}/chromedriver" "$DRIVER_PATH"
+    sudo mv chromedriver "$DRIVER_PATH"
     sudo chmod +x "$DRIVER_PATH"
-    rm -rf "chromedriver-${VERSION}.zip" "chromedriver-${CHROME_ARCH}"
+    rm -f "chromedriver-${VERSION}.zip"
 
     echo "ChromeDriver for Chrome $VERSION installed at $DRIVER_PATH"
   else
     echo "ChromeDriver for Chrome $VERSION already exists at $DRIVER_PATH"
   fi
 done
+
 
 
 # Define Firefox versions
