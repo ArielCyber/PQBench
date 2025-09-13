@@ -259,5 +259,44 @@ def _start_sniffer_for_target(
         return resp.status_code, {"text": resp.text}
 
 
+@app.route('/done', methods=['POST'])
+def done_handler():
+    data = request.get_json(force=True)  # {"os": "linux", "browser": "chrome", "algo": 1}
+    logging.info(f"Received done payload: {data}")
+
+    # Extract fields
+    os_name = data.get("os")
+    browser = data.get("browser")
+    algo = data.get("algo")
+
+    logging.debug(f"os={os_name}, browser={browser}, algo={algo}")
+
+    # --- Forward to sniffer /done ---
+    try:
+        chosen = choose_container(os_name, algo)
+        payload = {"url": chosen["url"]}
+
+        sniffer_resp = requests.post(
+            f"{SNIFFER_URL}/done",
+            json=payload,
+            timeout=10
+        )
+        sniffer_resp.raise_for_status()
+        sniffer_reply = sniffer_resp.json()
+        logging.info(f"Forwarded to sniffer, reply: {sniffer_reply}")
+    except Exception as e:
+        logging.error(f"Failed to forward to sniffer /done: {e}")
+        return jsonify({"status": "error", "reason": str(e)}), 502
+
+    # Return a response JSON
+    return jsonify({
+        "status": "ok",
+        "received": data,
+        "sniffer": sniffer_reply
+    })
+
+
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
