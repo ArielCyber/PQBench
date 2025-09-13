@@ -68,7 +68,7 @@ done
 
 # Step 5: Install ChromeDrivers for all Chrome versions defined
 for VERSION in "${CHROME_VERSIONS[@]}"; do
-  DRIVER_VERSION="${VERSION}.0.6613.137"
+  DRIVER_VERSION="${VERSION}.0.7204.184"
   DRIVER_PATH="/usr/local/bin/chromedriver-${VERSION}"
 
   if [[ ! -f "$DRIVER_PATH" ]]; then
@@ -81,26 +81,32 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
       ARCH="mac-x64"
     fi
 
-    curl -L -o "chromedriver-${VERSION}.zip" "https://repo.huaweicloud.com/chromedriver/${DRIVER_VERSION}/chromedriver-${ARCH}.zip"
+    ZIP_NAME="chromedriver-${ARCH}.zip"
+    DOWNLOAD_URL="https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${DRIVER_VERSION}/${ARCH}/${ZIP_NAME}"
+
+    # Download
+    curl -L -o "${ZIP_NAME}" "${DOWNLOAD_URL}"
 
     if [[ $? -ne 0 ]]; then
       echo "Failed to download ChromeDriver for version $VERSION. Skipping..."
       continue
     fi
 
-    unzip -q "chromedriver-${VERSION}.zip"
+    # Unzip
+    unzip -q "${ZIP_NAME}"
 
-    # If extracted into a folder (as in Huawei zipped format)
-    if [[ -d chromedriver_mac64 ]]; then
-      sudo mv chromedriver_mac64/chromedriver "$DRIVER_PATH"
-      rm -rf chromedriver_mac64
-    # Otherwise assume the binary is at root level (as in older zip files from Google)
-    elif [[ -f chromedriver ]]; then
-      sudo mv chromedriver "$DRIVER_PATH"
+    # Move binary from nested folder (new Google format)
+    if [[ -f chromedriver-${ARCH}/chromedriver ]]; then
+      sudo mv "chromedriver-${ARCH}/chromedriver" "$DRIVER_PATH"
+      sudo chmod +x "$DRIVER_PATH"
+      rm -rf "chromedriver-${ARCH}"
     else
       echo "chromedriver binary not found after unzip for version $VERSION"
       continue
     fi
+
+    # Cleanup ZIP
+    rm -f "${ZIP_NAME}"
   fi
 done
 
