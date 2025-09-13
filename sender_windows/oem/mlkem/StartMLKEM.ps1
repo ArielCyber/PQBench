@@ -93,6 +93,8 @@ try
 
     $env:MODE = "MLKEM"
     [Environment]::SetEnvironmentVariable('MODE', 'MLKEM', 'Machine')  # for the task at next boot
+    $env:SNIFFER_URL = "http://172.18.0.1:8080"
+    [Environment]::SetEnvironmentVariable('SNIFFER_URL', 'http://172.18.0.1:8080', 'Machine')  # for the task at next boot
 
     $action = New-ScheduledTaskAction -Execute "C:\pqbench-venv\Scripts\python.exe" -Argument "`"$repo\processor.py`""
     $trigger = New-ScheduledTaskTrigger -AtStartup
