@@ -74,7 +74,7 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
   if [[ ! -f "$DRIVER_PATH" ]]; then
     echo "Installing ChromeDriver $DRIVER_VERSION for Chrome $VERSION..."
 
-    # קבע ארכיטקטורה לפי הפלטפורמה
+    # Determine architecture based on platform
     if [[ $(uname -m) == "arm64" ]]; then
       ARCH="mac-arm64"
     else
@@ -88,20 +88,22 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
       continue
     fi
 
-  unzip -q "chromedriver-${VERSION}.zip"
+    unzip -q "chromedriver-${VERSION}.zip"
 
-  # אם יש תיקייה בשם chromedriver_mac64 (כמו בקובץ של Huawei)
-  if [[ -d chromedriver_mac64 ]]; then
-    sudo mv chromedriver_mac64/chromedriver "$DRIVER_PATH"
-    rm -rf chromedriver_mac64
-  # אחרת נניח שהקובץ הגיע ישירות (כמו בקבצי zip הישנים מ-Google)
-  elif [[ -f chromedriver ]]; then
-    sudo mv chromedriver "$DRIVER_PATH"
-  else
-    echo "❌ לא נמצא קובץ chromedriver לאחר unzip עבור גרסה $VERSION"
-    continue
+    # If extracted into a folder (as in Huawei zipped format)
+    if [[ -d chromedriver_mac64 ]]; then
+      sudo mv chromedriver_mac64/chromedriver "$DRIVER_PATH"
+      rm -rf chromedriver_mac64
+    # Otherwise assume the binary is at root level (as in older zip files from Google)
+    elif [[ -f chromedriver ]]; then
+      sudo mv chromedriver "$DRIVER_PATH"
+    else
+      echo "chromedriver binary not found after unzip for version $VERSION"
+      continue
+    fi
   fi
 done
+
 
 
 
