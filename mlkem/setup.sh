@@ -71,7 +71,11 @@ fi
 # Install Firefox 142
 FIREFOX_VERSION="142.0.1"
 FIREFOX_APP_NAME="Firefox 142.app"
-FIREFOX_URL="https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/${FIREFOX_ARCH}/en-US/Firefox%20${FIREFOX_VERSION}.dmg"
+if [[ "$ARCH" == "arm64" ]]; then
+  FIREFOX_URL="https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/mac-aarch64/en-US/Firefox%20${FIREFOX_VERSION}.dmg"
+else
+  FIREFOX_URL="https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/mac/en-US/Firefox%20${FIREFOX_VERSION}.dmg"
+fi
 
 if [ ! -d "/Applications/$FIREFOX_APP_NAME" ]; then
   echo "Installing Firefox $FIREFOX_VERSION..."
