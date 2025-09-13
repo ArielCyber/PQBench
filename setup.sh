@@ -34,18 +34,23 @@ pip install -r requirements.txt
 # Define Chrome versions
 CHROME_VERSIONS=("128.0.6613.137" "138.0.7204.184")
 CHROME_NAMES=("Google Chrome 128.app" "Google Chrome 138.app")
+CHROME_URLS=(
+  "https://storage.googleapis.com/chrome-for-testing-public/128.0.6613.137/${CHROME_ARCH}/chrome-${CHROME_ARCH}.zip"
+  "https://storage.googleapis.com/chrome-for-testing-public/138.0.7204.184/${CHROME_ARCH}/chrome-${CHROME_ARCH}.zip"
+)
 
 # Step 4: Install required Chrome versions
 for i in "${!CHROME_VERSIONS[@]}"; do
   VERSION="${CHROME_VERSIONS[$i]}"
   APP_NAME="${CHROME_NAMES[$i]}"
+  URL="${CHROME_URLS[$i]}"
   if [ ! -d "/Applications/$APP_NAME" ]; then
     echo "Chrome $VERSION not found. Downloading..."
     ZIP_NAME="chrome-$VERSION.zip"
-    curl -L -o "$ZIP_NAME" "https://edgedl.me.gvt1.com/edgedl/chrome/mac/universal/stable/$VERSION/GoogleChrome-$CHROME_ARCH.zip"
+    curl -L -o "$ZIP_NAME" "$URL"
     unzip -q "$ZIP_NAME"
-    mv "Google Chrome.app" "/Applications/$APP_NAME"
-    rm "$ZIP_NAME"
+    mv chrome-${CHROME_ARCH}/Google\ Chrome.app "/Applications/$APP_NAME"
+    rm -rf "$ZIP_NAME" chrome-${CHROME_ARCH}
     echo "Installed Chrome $VERSION as $APP_NAME"
   else
     echo "Chrome $VERSION already installed."
