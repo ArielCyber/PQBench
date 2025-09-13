@@ -1,12 +1,5 @@
 version: "3.9"
 
-networks:
-  pqbench:
-    driver: bridge
-    # Give the bridge a stable, known name so the sniffer can target it.
-    driver_opts:
-      com.docker.network.bridge.name: pqbench0
-
 services:
   linux_kyber:
     build:
@@ -49,7 +42,7 @@ services:
       context: ./sniffer
     container_name: pqbench-sniffer
     # IMPORTANT: run in host netns so it can see the bridge interface
-    network_mode: host        # Linux only
+    network_mode: host
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -61,3 +54,72 @@ services:
       IFACE: pqbench0
     volumes:
       - ./output:/output
+
+  # Estimated first install + boot time - 25~ minutes
+  # Estimated non first time startup - 1.5~ minutes
+  # Windows VM that will run the windows processor
+  win-kyber:
+    image: dockurr/windows
+    container_name: win-kyber
+    environment:
+      VERSION: "2025"
+      EDITION: "core"
+      RAM_SIZE: "6G"
+      DISK_SIZE: "40G"
+      CPU_CORES: "2"
+      USERNAME: "Docker"      # default user (can change)
+      PASSWORD: "admin"       # default pass (can change)
+      # Optional: give Windows its own L2 IP later (see macvlan note)
+      # DHCP: "Y"
+      ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to work : https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8006:8006"           # web viewer (install phase / emergency)
+      - "5003:5000"           # Flask inside Windows -> exposed as 5001 on host/network
+    volumes:
+      - ./oem/kyber:/oem      # auto-run installer at first boot
+      - ./:/data              # shows up inside Windows as \\host.lan\Data
+      - ./windows-kyber:/storage
+    restart: unless-stopped
+    stop_grace_period: 2m
+    networks:
+      - pqbench-win
+
+  # Windows VM that will run the windows processor
+  win-mlkem:
+    image: dockurr/windows
+    container_name: win-mlkem
+    environment:
+      VERSION: "2025"
+      RAM_SIZE: "6G"
+      EDITION: "core"
+      DISK_SIZE: "40G"
+      CPU_CORES: "2"
+      ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to boot consistently: https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8007:8006"
+      - "5004:5000"
+    volumes:
+      - ./oem/mlkem:/oem
+      - ./:/data
+      - ./windows-mlkem:/storage
+    restart: unless-stopped
+    stop_grace_period: 2m
+    networks:
+      - pqbench-win
+
+networks:
+  pqbench:
+    driver: bridge
+    # Give the bridge a stable, known name so the sniffer can target it.
+    driver_opts:
+      com.docker.network.bridge.name: pqbench0

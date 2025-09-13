@@ -1,0 +1,63 @@
+# escape=`
+
+# Has .NET Framework 4.8 preinstalled (avoids reboot hell)
+FROM mcr.microsoft.com/dotnet/framework/runtime:4.8-windowsservercore-ltsc2022
+
+SHELL ["powershell","-NoProfile","-ExecutionPolicy","Bypass","-Command"]
+
+# Make sure TLS12 is used for web requests
+RUN [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; `
+    Invoke-Expression (New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')
+
+# Chocolatey non-interactive and ignore any package asking for reboot
+ENV ChocolateyUseWindowsCompression=false
+ENV CHOCOLATEY_ACCEPTLICENSE=Y
+
+# Handy: some packages (e.g., chrome) occasionally signal reboot; ignore that in containers
+# (documented choco switch --ignore-detected-reboot)
+RUN choco feature enable -n=allowGlobalConfirmation ; `
+    choco feature enable -n=useEnhancedExitCodes
+
+# --- Dev/runtime tools ---
+RUN choco install python --version=3.11.9 --ignore-detected-reboot
+
+ENV MODE="MLKEM"
+
+ADD fonts/FontsToAdd.tar /Fonts/
+WORKDIR /Fonts/
+RUN .\Add-Font.ps1 Fonts
+WORKDIR /
+
+# --- Browsers & drivers ---
+# Chrome + Chromedriver (driver version should roughly match your Chrome major version;
+# leave unpinned to auto-track Chocolatey package updates or pin if you need exact control)
+RUN choco install googlechrome --version=139.0.7258.155  --ignore-detected-reboot --params "'/NoDesktopShortcuts /DoNotLaunchChrome'" ; `
+    choco install chromedriver --version=139.0.7258.154 --ignore-detected-reboot
+
+# Firefox
+RUN choco install firefox --version=142.0.1 --params '"/NoTaskbarShortcut /NoDesktopShortcut /NoStartMenuShortcut /NoAutoUpdate"'
+
+# App files
+WORKDIR C:/app/
+COPY . C:/app/
+
+# Python deps (expects requirements.txt at repo root)
+RUN C:\Python311\python.exe -m pip install --upgrade pip; `
+    C:\Python311\python.exe -m pip install -r requirements.txt
+
+# Expose Flask port
+EXPOSE 5000
+
+#########################################################################################################
+##################################### EXTREMELY IMPORTANT ###############################################
+# TO MAKE CHROME RUN IN WINDOWS CONTAINER YOU NEED TO DOWNLOAD AND INSTALL THE FONTS INTO THE CONTAINER #
+#########################################################################################################
+#########################################################################################################
+
+COPY oem/kyber/Start.ps1 C:/scripts/Start.ps1
+
+# This ENV is passed to Start.ps1 to 'tell it' which script to run
+ENV PROCESS_SCRIPT=processorMLKEM.py
+
+# Install fonts launch Processor
+CMD ["powershell","-NoProfile","-ExecutionPolicy","Bypass","-File","C:\\scripts\\Start.ps1"]
