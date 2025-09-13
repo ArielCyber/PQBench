@@ -55,7 +55,7 @@ services:
     volumes:
       - ./output:/output
 
-  # Estimated first install + boot time - 25~ minutes
+  # Estimated first install + boot time - 20~ minutes
   # Estimated non first time startup - 1.5~ minutes
   # Windows VM that will run the windows processor
   win-kyber:
@@ -72,6 +72,7 @@ services:
       # Optional: give Windows its own L2 IP later (see macvlan note)
       # DHCP: "Y"
       ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to work : https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
+      SNIFFER_URL: "http://192.168.1.100:8080"
     devices:
       - /dev/kvm
       - /dev/net/tun
@@ -81,13 +82,13 @@ services:
       - "8006:8006"           # web viewer (install phase / emergency)
       - "5003:5000"           # Flask inside Windows -> exposed as 5001 on host/network
     volumes:
-      - ./oem/kyber:/oem      # auto-run installer at first boot
-      - ./:/data              # shows up inside Windows as \\host.lan\Data
-      - ./windows-kyber:/storage
+      - ./sender_windows/oem/kyber:/oem      # auto-run installer at first boot
+      - ./sender_windows/:/data              # shows up inside Windows as \\host.lan\Data
+      - ./sender_windows/windows-kyber:/storage
     restart: unless-stopped
     stop_grace_period: 2m
     networks:
-      - pqbench-win
+      - pqbench
 
   # Windows VM that will run the windows processor
   win-mlkem:
@@ -100,6 +101,7 @@ services:
       DISK_SIZE: "40G"
       CPU_CORES: "2"
       ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to boot consistently: https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
+      SNIFFER_URL: "http://192.168.1.100:8080"
     devices:
       - /dev/kvm
       - /dev/net/tun
@@ -109,13 +111,13 @@ services:
       - "8007:8006"
       - "5004:5000"
     volumes:
-      - ./oem/mlkem:/oem
-      - ./:/data
-      - ./windows-mlkem:/storage
+      - ./sender_windows/oem/mlkem:/oem
+      - ./sender_windows/:/data
+      - ./sender_windows/windows-mlkem:/storage
     restart: unless-stopped
     stop_grace_period: 2m
     networks:
-      - pqbench-win
+      - pqbench
 
 networks:
   pqbench:

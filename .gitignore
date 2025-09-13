@@ -1,5 +1,5 @@
 /.venv
 /.idea
 /output
-/windows-kyber
-/windows-mlkem
+/sender_windows/windows-kyber
+/sender_windows/windows-mlkem
