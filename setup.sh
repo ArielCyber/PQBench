@@ -3,7 +3,6 @@
 set -e
 echo "Starting macOS PQC setup..."
 
-# Detect architecture (arm64 = Apple Silicon, x86_64 = Intel)
 ARCH=$(uname -m)
 if [[ "$ARCH" == "arm64" ]]; then
   CHROME_ARCH="mac-arm64"
@@ -32,19 +31,33 @@ echo "Installing Python requirements..."
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# Step 4: Check for Chrome installation
-echo "Checking for Google Chrome..."
-if [ ! -d "/Applications/Google Chrome.app" ]; then
-  echo "Google Chrome is not installed. Please install it manually."
-else
-  echo "Google Chrome is installed."
-fi
+# Define Chrome versions
+CHROME_VERSIONS=("128.0.6613.137" "138.0.7204.184")
+CHROME_NAMES=("Google Chrome 128.app" "Google Chrome 138.app")
 
-# Step 5: Install ChromeDriver if needed
+# Step 4: Install required Chrome versions
+for i in "${!CHROME_VERSIONS[@]}"; do
+  VERSION="${CHROME_VERSIONS[$i]}"
+  APP_NAME="${CHROME_NAMES[$i]}"
+  if [ ! -d "/Applications/$APP_NAME" ]; then
+    echo "Chrome $VERSION not found. Downloading..."
+    ZIP_NAME="chrome-$VERSION.zip"
+    curl -L -o "$ZIP_NAME" "https://edgedl.me.gvt1.com/edgedl/chrome/mac/universal/stable/$VERSION/GoogleChrome-$CHROME_ARCH.zip"
+    unzip -q "$ZIP_NAME"
+    mv "Google Chrome.app" "/Applications/$APP_NAME"
+    rm "$ZIP_NAME"
+    echo "Installed Chrome $VERSION as $APP_NAME"
+  else
+    echo "Chrome $VERSION already installed."
+  fi
+done
+
+# Step 5: Install ChromeDriver for 138 (only if not present)
+CHROMEDRIVER_VERSION="138.0.7204.0"
 INSTALLED_CHROMEDRIVER=$(chromedriver --version 2>/dev/null || true)
-if [[ "$INSTALLED_CHROMEDRIVER" != *"138."* ]]; then
-  echo "Installing ChromeDriver for Chrome 138..."
-  curl -L -o chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/138.0.7204.0/$CHROME_ARCH/chromedriver-$CHROME_ARCH.zip"
+if [[ "$INSTALLED_CHROMEDRIVER" != *"$CHROMEDRIVER_VERSION"* ]]; then
+  echo "Installing ChromeDriver $CHROMEDRIVER_VERSION..."
+  curl -L -o chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/$CHROMEDRIVER_VERSION/$CHROME_ARCH/chromedriver-$CHROME_ARCH.zip"
   unzip chromedriver.zip
   sudo mv chromedriver-$CHROME_ARCH/chromedriver /usr/local/bin/chromedriver
   sudo chmod +x /usr/local/bin/chromedriver
@@ -54,25 +67,34 @@ else
   echo "ChromeDriver already installed and compatible."
 fi
 
-# Step 6: Check for Firefox installation
-echo "Checking for Firefox..."
-if [ ! -d "/Applications/Firefox.app" ]; then
-  echo "Firefox not found. Installing Firefox 142.0.1..."
-  curl -L -o firefox.dmg "https://download-installer.cdn.mozilla.net/pub/firefox/releases/142.0.1/$FIREFOX_ARCH/en-US/Firefox%20142.0.1.dmg"
-  hdiutil attach firefox.dmg
-  cp -r /Volumes/Firefox/Firefox.app /Applications/
-  hdiutil detach /Volumes/Firefox
-  rm firefox.dmg
-  echo "Firefox installed."
-else
-  echo "Firefox is installed."
-fi
+# Define Firefox versions
+FIREFOX_VERSIONS=("130.0.1" "142.0.1")
+FIREFOX_NAMES=("Firefox 130.app" "Firefox 142.app")
+
+# Step 6: Install required Firefox versions
+for i in "${!FIREFOX_VERSIONS[@]}"; do
+  VERSION="${FIREFOX_VERSIONS[$i]}"
+  APP_NAME="${FIREFOX_NAMES[$i]}"
+  if [ ! -d "/Applications/$APP_NAME" ]; then
+    echo "Firefox $VERSION not found. Downloading..."
+    DMG_NAME="firefox-$VERSION.dmg"
+    curl -L -o "$DMG_NAME" "https://download-installer.cdn.mozilla.net/pub/firefox/releases/$VERSION/$FIREFOX_ARCH/en-US/Firefox%20$VERSION.dmg"
+    hdiutil attach "$DMG_NAME"
+    cp -r /Volumes/Firefox/Firefox.app "/Applications/$APP_NAME"
+    hdiutil detach /Volumes/Firefox
+    rm "$DMG_NAME"
+    echo "Installed Firefox $VERSION as $APP_NAME"
+  else
+    echo "Firefox $VERSION already installed."
+  fi
+done
 
 # Step 7: Install Geckodriver if not present
+GECKODRIVER_VERSION="v0.34.0"
 echo "Checking for geckodriver..."
 if ! command -v geckodriver &> /dev/null; then
-  echo "Installing geckodriver v0.34.0..."
-  curl -L -o geckodriver.tar.gz "https://github.com/mozilla/geckodriver/releases/download/v0.34.0/geckodriver-v0.34.0-$FIREFOX_ARCH.tar.gz"
+  echo "Installing geckodriver $GECKODRIVER_VERSION..."
+  curl -L -o geckodriver.tar.gz "https://github.com/mozilla/geckodriver/releases/download/$GECKODRIVER_VERSION/geckodriver-$GECKODRIVER_VERSION-$FIREFOX_ARCH.tar.gz"
   tar -xvzf geckodriver.tar.gz
   sudo mv geckodriver /usr/local/bin/geckodriver
   sudo chmod +x /usr/local/bin/geckodriver

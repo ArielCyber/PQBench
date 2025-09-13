@@ -68,6 +68,7 @@ def open_browser(browser: str, algo: int):
 def open_firefox(algo):
     """
     Launch a Selenium WebDriver for Firefox with a given Algo.
+    Uses Firefox 130 for algo 0 and 1, Firefox 142 for algo 2.
     """
     logging.debug("Trying to open Firefox")
 
@@ -80,25 +81,44 @@ def open_firefox(algo):
         firefox_opts.set_preference('network.http.http3.enable_kyber', False)
         firefox_opts.set_preference('security.tls.enable_kyber', False)
         logging.debug("Set non PQC preferences")
-    if algo == 1 or algo == 2:  # Enable Kyber or MLKEM (Same flags)
+    elif algo in [1, 2]:  # Enable Kyber or MLKEM (Same flags)
         firefox_opts.set_preference("security.tls.enable_kyber", True)
         firefox_opts.set_preference("network.http.http3.enabled", True)
         firefox_opts.set_preference("network.http.http3.enable_kyber", True)
         logging.debug("Set PQC on")
 
     try:
+        # Select Firefox binary based on algo
+        if algo in [0, 1]:
+            firefox_path = "/Applications/Firefox 130.app/Contents/MacOS/firefox"
+        else:
+            firefox_path = "/Applications/Firefox 142.app/Contents/MacOS/firefox"
+
         gecko_path = GeckoDriverManager().install()
+        logging.debug(f"Using Firefox binary at: {firefox_path}")
         logging.debug("Installed GeckoDriverManager successfully!")
-        return webdriver.Firefox(service=FirefoxService(gecko_path), options=firefox_opts, )
+
+        return webdriver.Firefox(
+            service=FirefoxService(gecko_path),
+            options=firefox_opts,
+            firefox_binary=firefox_path
+        )
     except WebDriverException as e:
         logging.critical(e)
         raise BrowserLaunchError("Failed to open Firefox: is Firefox installed and the driver up to date?") from e
 
 
+
 def open_chrome(algo):
+    """
+    Launch a Selenium WebDriver for Chrome with a given Algo.
+    Uses a specific Chrome binary based on the algo parameter:
+    - algo 0 or 1: Chrome 128
+    - algo 2: Chrome 138
+    """
     chrome_opts = webdriver.ChromeOptions()
 
-    # Headless Chrome
+    # Headless Chrome options
     chrome_opts.add_argument("--no-sandbox")  # containers often need this
     chrome_opts.add_argument("--headless=new")
     chrome_opts.add_argument("--disable-gpu")  # Windows workaround
@@ -107,22 +127,25 @@ def open_chrome(algo):
 
     prefs = {"browser": {"enabled_labs_experiments": []}}
 
-    # ----- Chrome PQC experiments (via Local State "enabled_labs_experiments") -----
-    if algo == 0:
+    if algo in [0, 1]:
+        # Non-PQC or Kyber-only — use Chrome 128
         prefs["browser"]["enabled_labs_experiments"] = [
-            "enable-tls13-kyber@2",
-            "use-ml-kem@2"]
-
-    elif algo == 1:
-        prefs["browser"]["enabled_labs_experiments"] = [
-            "use-ml-kem@2"]
-    elif algo == 2:  # ML-KEM
-        prefs["browser"]["enabled_labs_experiments"] = [
-            "enable-tls13-kyber@2",  # Disabled
-            "use-ml-kem@1",  # Enabled
+            "enable-tls13-kyber@2",  # explicitly disabled
+            "use-ml-kem@2"           # explicitly disabled
         ]
+        chrome_path = "/Applications/Google Chrome 128.app/Contents/MacOS/Google Chrome"
+    elif algo == 2:
+        # ML-KEM (PQC) — use Chrome 138
+        prefs["browser"]["enabled_labs_experiments"] = [
+            "enable-tls13-kyber@2",  # explicitly disabled
+            "use-ml-kem@1"           # enabled
+        ]
+        chrome_path = "/Applications/Google Chrome 138.app/Contents/MacOS/Google Chrome"
+    else:
+        raise ValueError(f"Unknown algorithm value: {algo}")
 
     chrome_opts.add_experimental_option("localState", prefs)
+    chrome_opts.binary_location = chrome_path
 
     try:
         chromedriver_path = os.environ.get("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
@@ -131,6 +154,7 @@ def open_chrome(algo):
     except WebDriverException as e:
         logging.critical(e)
         raise BrowserLaunchError("Failed to open Chrome: is Chrome installed and the driver up to date?") from e
+
 
 
 def process_session(browser: str, algo: int, amount: int, domain: str):
