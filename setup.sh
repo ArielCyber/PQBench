@@ -84,11 +84,14 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
     ZIP_NAME="chromedriver-${ARCH}.zip"
     DOWNLOAD_URL="https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${DRIVER_VERSION}/${ARCH}/${ZIP_NAME}"
 
-    # Download
-    curl -L -o "${ZIP_NAME}" "${DOWNLOAD_URL}"
+    # Download with headers to mimic browser
+    curl -L -o "${ZIP_NAME}" "${DOWNLOAD_URL}" \
+      -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" \
+      -H "Accept: */*" \
+      -H "Connection: keep-alive"
 
     if [[ $? -ne 0 ]]; then
-      echo "Failed to download ChromeDriver for version $VERSION. Skipping..."
+      echo "❌ Failed to download ChromeDriver for version $VERSION. Skipping..."
       continue
     fi
 
@@ -101,7 +104,7 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
       sudo chmod +x "$DRIVER_PATH"
       rm -rf "chromedriver-${ARCH}"
     else
-      echo "chromedriver binary not found after unzip for version $VERSION"
+      echo "⚠️ chromedriver binary not found after unzip for version $VERSION"
       continue
     fi
 
@@ -109,6 +112,7 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
     rm -f "${ZIP_NAME}"
   fi
 done
+
 
 
 
