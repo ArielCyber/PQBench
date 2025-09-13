@@ -104,8 +104,8 @@ try
     # Set env variables
     $env:MODE = "KYBER"
     [Environment]::SetEnvironmentVariable('MODE', 'KYBER', 'Machine')  # for the task at next boot
-    $env:SNIFFER_URL = "http://172.18.0.1:8080"
-    [Environment]::SetEnvironmentVariable('SNIFFER_URL', 'http://172.18.0.1:8080', 'Machine')  # for the task at next boot
+    $env:SWITCHER_URL = "http://172.18.0.1:8080"
+    [Environment]::SetEnvironmentVariable('SWITCHER_URL', 'http://172.18.0.1:8080', 'Machine')  # for the task at next boot
 
     # Start now (first boot) so the service is up without reboot
     Start-Process -FilePath "C:\pqbench-venv\Scripts\python.exe" -ArgumentList "`"$repo\processor.py`"" -WindowStyle Minimized

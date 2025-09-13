@@ -72,17 +72,17 @@ def _default_gateway_ip() -> str | None:
         return None
 
 
-def resolve_sniffer_url() -> str:
+def resolve_switcher_url() -> str:
     """
-    Resolve the URL of the sniffer service, with multiple fallback strategies.
+    Resolve the URL of the switcher service, with multiple fallback strategies.
 
     Priority order:
-    1. **Environment variable** (`SNIFFER_URL`): If set, always use this value.
+    1. **Environment variable** (`SWITCHER_URL`): If set, always use this value.
     2. **Docker Desktop special DNS name**: Try contacting
-       `http://host.docker.internal:8080/health`. This works when the sniffer
+       `http://host.docker.internal:8080/health`. This works when the switcher
        runs on the Windows/Mac host and is reachable via Docker Desktop's
        built-in host alias.
-    3. **Linux container gateway fallback**: If the sniffer is running in
+    3. **Linux container gateway fallback**: If the switcher is running in
        `network_mode: host` on the Docker Desktop VM OR Linux host, the correct way to reach
        it is via the default gateway of the container’s bridge network
        (determined by `_default_gateway_ip()`).
@@ -95,7 +95,7 @@ def resolve_sniffer_url() -> str:
         The base URL of the sniffer service to contact.
     """
     # env override
-    env_url = os.getenv("SNIFFER_URL")
+    env_url = os.getenv("SWITCHER_URL")
     if env_url:
         return env_url
     # try host.docker.internal first (works on Desktop if service is on the Windows host)
@@ -112,8 +112,19 @@ def resolve_sniffer_url() -> str:
     return "http://host.docker.internal:8080"
 
 
-SNIFFER_URL = resolve_sniffer_url()
-logging.debug(f"SNIFFER_URL is {SNIFFER_URL}")
+SWITCHER_URL = resolve_switcher_url()
+logging.debug(f"SNIFFER_URL is {SWITCHER_URL}")
+
+
+@app.get("/health")
+def health():
+    """
+    Liveness/readiness probe endpoint.
+
+    Returns:
+        ``{"ok": True}`` when the service is up.
+    """
+    return "ok", 200
 
 
 def open_browser(browser: str, algo: int):
@@ -244,21 +255,6 @@ def process_session(browser: str, algo: int, amount: int, domain: str):
     dict
         JSON-serializable result with 'status'.
     """
-    # ---- Trigger the sniffer ----
-    try:
-        sniffer_info = start_sniffer(
-            os_name="windows",  # or detect dynamically
-            browser=browser,
-            sessions=amount,
-            algo=algo,
-            iface="pqbench0",
-            domain=domain
-        )
-        logging.info(f"Sniffer started: {sniffer_info}")
-    except Exception as e:
-        logging.error(f"Could not start sniffer: {e}")
-        # you can decide: return early, or continue without capture
-        # return {"status": "sniffer unavailable"}
 
     for i in range(amount):
         driver = open_browser(browser, algo)
@@ -302,57 +298,6 @@ def _measure_one_session(browser: str, algo: int, domain: str) -> float:
 
     logging.debug(f"Session time: {time.monotonic() - t0}")
     return time.monotonic() - t0
-
-
-def get_linux_container_bridge_ip_from_oem(path=r"C:\OEM\bridge_ip.txt") -> str | None:
-    try:
-        txt = Path(path).read_text(encoding="utf-8").strip()
-        return txt or None
-    except Exception:
-        return None
-
-
-def start_sniffer(os_name: str, browser: str, algo: int, domain: str, sessions: int,
-                  duration: int = 10, iface: str = "pqbench0"):
-
-    my_ip = get_linux_container_bridge_ip_from_oem()
-    logging.debug(f"TARGET_IP is {my_ip}")
-
-    # measure once, then scale
-    per = max(_measure_one_session(browser, algo, domain), 5.0)  # never assume <5s
-    safety = float(os.getenv("SNIFFER_DURATION_SAFETY", "1.3"))  # tweakable
-    total = int(duration + per * sessions * safety)
-    logging.debug(f"Total duration time: {total}")
-
-    # Better code for the switcher
-    other_ip = "172.18.0.3" if my_ip == "172.18.0.2" else "172.18.0.2"
-    payload = {
-        "targets": [
-            {
-                "os": os_name,
-                "browser": browser,
-                "algo": algo,
-                "container_ip": my_ip,
-                "duration_sec": total,
-                "iface": iface,
-                "filter_mode": "domain",
-                "domain": domain,
-                "session_count": sessions,
-            }
-        ]
-    }
-
-    # tiny retry loop in case sniffer isn’t ready yet
-    for attempt in range(10):
-        try:
-            r = requests.post(f"{SNIFFER_URL}/start", json=payload, timeout=5)
-            r.raise_for_status()
-            logging.info("Sniffer started: %s", r.json())
-            return r.json()
-        except Exception as e:
-            logging.warning("Sniffer not ready yet (attempt %d): %s", attempt + 1, e)
-            time.sleep(1)
-    raise RuntimeError("Failed to reach sniffer API after retries")
 
 
 @app.route('/')
