@@ -67,12 +67,17 @@ for i in "${!CHROME_VERSIONS[@]}"; do
 done
 
 # Step 5: Install ChromeDrivers for all Chrome versions defined
+
+# Step 1: Define Chrome versions to install drivers for
+CHROME_VERSIONS=("128.0.6613.137" "138.0.7204.183")
+
+# Step 2: Install ChromeDrivers for all Chrome versions defined
 for VERSION in "${CHROME_VERSIONS[@]}"; do
-  DRIVER_VERSION="${VERSION}.0.7204.184"
+  DRIVER_VERSION="${VERSION}"
   DRIVER_PATH="/usr/local/bin/chromedriver-${VERSION}"
 
   if [[ ! -f "$DRIVER_PATH" ]]; then
-    echo "Installing ChromeDriver $DRIVER_VERSION for Chrome $VERSION..."
+    echo "🔽 Installing ChromeDriver $DRIVER_VERSION for Chrome $VERSION..."
 
     # Determine architecture based on platform
     if [[ $(uname -m) == "arm64" ]]; then
@@ -88,7 +93,7 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
     curl -L -A "Mozilla/5.0" -o "${ZIP_NAME}" "${DOWNLOAD_URL}"
 
     if [[ $? -ne 0 ]]; then
-      echo "Failed to download ChromeDriver for version $VERSION. Skipping..."
+      echo "❌ Failed to download ChromeDriver for version $VERSION. Skipping..."
       continue
     fi
 
@@ -99,15 +104,19 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
     if [[ -f chromedriver ]]; then
       sudo mv chromedriver "$DRIVER_PATH"
       sudo chmod +x "$DRIVER_PATH"
+      echo "✅ Installed chromedriver-${VERSION}"
     else
-      echo "chromedriver binary not found after unzip for version $VERSION"
+      echo "❌ chromedriver binary not found after unzip for version $VERSION"
       continue
     fi
 
     # Cleanup ZIP
     rm -f "${ZIP_NAME}"
+  else
+    echo "✔️ ChromeDriver $VERSION already exists at $DRIVER_PATH"
   fi
 done
+
 
 
 # Define Firefox versions
