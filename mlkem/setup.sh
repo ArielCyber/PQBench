@@ -1,7 +1,7 @@
 #!/bin/bash
 
 set -e
-echo "Starting Kyber setup..."
+echo "Starting MLKEM setup..."
 
 # detect arch
 ARCH=$(uname -m)
@@ -45,10 +45,17 @@ if [[ ! -f "$DRIVER_PATH" ]]; then
   ZIP_NAME="chromedriver-${CHROME_ARCH}.zip"
   DL_URL="https://repo.huaweicloud.com/chromedriver/${CHROME_VERSION}/${ZIP_NAME}"
   curl -L -A "Mozilla/5.0" -o "$ZIP_NAME" "$DL_URL"
-  unzip -q "$ZIP_NAME"
-  sudo mv chromedriver "$DRIVER_PATH"
+  unzip -q "$ZIP_NAME" -d chromedriver_temp
+  CHROMEDRIVER_BINARY=$(find chromedriver_temp -type f -name chromedriver)
+
+  if [[ -z "$CHROMEDRIVER_BINARY" ]]; then
+    echo "Error: chromedriver binary not found!"
+    exit 1
+  fi
+
+  sudo mv "$CHROMEDRIVER_BINARY" "$DRIVER_PATH"
   sudo chmod +x "$DRIVER_PATH"
-  rm "$ZIP_NAME"
+  rm -rf "$ZIP_NAME" chromedriver_temp
 else
   echo "ChromeDriver version $CHROME_VERSION already installed."
 fi
@@ -64,7 +71,7 @@ fi
 # Install Firefox 142
 FIREFOX_VERSION="142.0.1"
 FIREFOX_APP_NAME="Firefox 142.app"
-FIREFOX_URL="https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/mac/${CHROME_ARCH}/en-US/Firefox%20${FIREFOX_VERSION}.dmg"
+FIREFOX_URL="https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/${FIREFOX_ARCH}/en-US/Firefox%20${FIREFOX_VERSION}.dmg"
 
 if [ ! -d "/Applications/$FIREFOX_APP_NAME" ]; then
   echo "Installing Firefox $FIREFOX_VERSION..."
@@ -93,4 +100,4 @@ else
   echo "Geckodriver $GECKODRIVER_VERSION already installed."
 fi
 
-echo "Kyber setup complete."
+echo "MLKEM setup complete."

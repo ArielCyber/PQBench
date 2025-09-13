@@ -72,7 +72,7 @@
       <option name="presentableId" value="Default" />
       <updated>1757451469127</updated>
       <workItem from="1757451470233" duration="21873000" />
-      <workItem from="1757777126348" duration="3444000" />
+      <workItem from="1757777126348" duration="4569000" />
     </task>
     <task id="LOCAL‎-00001" summary="update README">
       <option name="closed" value="true" />
@@ -202,7 +202,15 @@
       <option name="project" value="LOCAL‎" />
       <updated>1757780286963</updated>
     </task>
-    <option name="localTasksCounter" value="17" />
+    <task id="LOCAL‎-00017" summary="updated PQC/NonPQC support">
+      <option name="closed" value="true" />
+      <created>1757780834946</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL‎-00017" />
+      <option name="project" value="LOCAL‎" />
+      <updated>1757780834946</updated>
+    </task>
+    <option name="localTasksCounter" value="18" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
