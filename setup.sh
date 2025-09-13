@@ -44,33 +44,54 @@ for i in "${!CHROME_VERSIONS[@]}"; do
   VERSION="${CHROME_VERSIONS[$i]}"
   APP_NAME="${CHROME_NAMES[$i]}"
   URL="${CHROME_URLS[$i]}"
+
   if [ ! -d "/Applications/$APP_NAME" ]; then
     echo "Chrome $VERSION not found. Downloading..."
     ZIP_NAME="chrome-$VERSION.zip"
+
+    # Download and unzip
     curl -L -o "$ZIP_NAME" "$URL"
     unzip -q "$ZIP_NAME"
-    mv chrome-${CHROME_ARCH}/Google\ Chrome.app "/Applications/$APP_NAME"
-    rm -rf "$ZIP_NAME" chrome-${CHROME_ARCH}
+
+    # Rename the app folder
+    echo "Renaming app and moving to /Applications..."
+    mv "chrome-${CHROME_ARCH}/Google Chrome for Testing.app" "chrome-${CHROME_ARCH}/$APP_NAME"
+    sudo mv "chrome-${CHROME_ARCH}/$APP_NAME" "/Applications/$APP_NAME"
+
+    # Cleanup
+    rm -rf "$ZIP_NAME" "chrome-${CHROME_ARCH}"
     echo "Installed Chrome $VERSION as $APP_NAME"
   else
-    echo "Chrome $VERSION already installed."
+    echo "Chrome $VERSION already installed as $APP_NAME."
   fi
 done
 
-# Step 5: Install ChromeDriver for 138 (only if not present)
-CHROMEDRIVER_VERSION="138.0.7204.0"
-INSTALLED_CHROMEDRIVER=$(chromedriver --version 2>/dev/null || true)
-if [[ "$INSTALLED_CHROMEDRIVER" != *"$CHROMEDRIVER_VERSION"* ]]; then
-  echo "Installing ChromeDriver $CHROMEDRIVER_VERSION..."
-  curl -L -o chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/$CHROMEDRIVER_VERSION/$CHROME_ARCH/chromedriver-$CHROME_ARCH.zip"
-  unzip chromedriver.zip
-  sudo mv chromedriver-$CHROME_ARCH/chromedriver /usr/local/bin/chromedriver
-  sudo chmod +x /usr/local/bin/chromedriver
-  rm -rf chromedriver.zip chromedriver-$CHROME_ARCH
-  echo "ChromeDriver installed."
-else
-  echo "ChromeDriver already installed and compatible."
-fi
+# Step 5: Install ChromeDrivers for all Chrome versions defined
+for VERSION in "${CHROME_VERSIONS[@]}"; do
+  DRIVER_VERSION="${VERSION}.0.0"
+  DRIVER_PATH="/usr/local/bin/chromedriver-${VERSION}"
+
+  if [[ ! -f "$DRIVER_PATH" ]]; then
+    echo "Installing ChromeDriver $DRIVER_VERSION for Chrome $VERSION..."
+
+    curl -L -o "chromedriver-${VERSION}.zip" "https://storage.googleapis.com/chrome-for-testing-public/${DRIVER_VERSION}/${CHROME_ARCH}/chromedriver-${CHROME_ARCH}.zip"
+
+    if [[ $? -ne 0 ]]; then
+      echo "Failed to download ChromeDriver for version $VERSION. Skipping..."
+      continue
+    fi
+
+    unzip -q "chromedriver-${VERSION}.zip"
+    sudo mv "chromedriver-${CHROME_ARCH}/chromedriver" "$DRIVER_PATH"
+    sudo chmod +x "$DRIVER_PATH"
+    rm -rf "chromedriver-${VERSION}.zip" "chromedriver-${CHROME_ARCH}"
+
+    echo "ChromeDriver for Chrome $VERSION installed at $DRIVER_PATH"
+  else
+    echo "ChromeDriver for Chrome $VERSION already exists at $DRIVER_PATH"
+  fi
+done
+
 
 # Define Firefox versions
 FIREFOX_VERSIONS=("130.0.1" "142.0.1")
