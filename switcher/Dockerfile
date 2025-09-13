@@ -11,6 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY . .
+COPY .. .
 
 EXPOSE 5000

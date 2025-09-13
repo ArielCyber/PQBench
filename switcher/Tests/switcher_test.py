@@ -1,5 +1,5 @@
 import pytest
-import switcher
+from switcher import switcher
 
 '''
 Test all valid arguments - operation system, browser and algorithm combinations to get the right container key

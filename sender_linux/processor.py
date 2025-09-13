@@ -355,6 +355,17 @@ def process_session(browser: str, algo: int, amount: int, domain: str):
     return {"status": "done"}
 
 
+@app.get("/health")
+def health():
+    """
+    Liveness/readiness probe endpoint.
+
+    Returns:
+        ``{"ok": True}`` when the service is up.
+    """
+    return "ok", 200
+
+
 @app.route('/config', methods=['POST'])
 def config_handler():
     """

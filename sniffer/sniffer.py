@@ -434,12 +434,13 @@ def _startup():
 
 @app.get("/health")
 def health():
-    """Liveness/readiness probe endpoint.
-
-        Returns:
-            ``{"ok": True}`` when the service is up.
     """
-    return {"ok": True}
+    Liveness/readiness probe endpoint.
+
+    Returns:
+        ``{"ok": True}`` when the service is up.
+    """
+    return "ok", 200
 
 
 @app.get("/ifaces")
