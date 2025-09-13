@@ -47,7 +47,16 @@ if [[ ! -f "$DRIVER_PATH" ]]; then
   DL_URL="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/${CHROME_ARCH}/chromedriver-${CHROME_ARCH}.zip"
   curl -L -o "$ZIP_NAME" "$DL_URL"
   unzip -q "$ZIP_NAME" -d chromedriver_temp
-  sudo mv chromedriver_temp/chromedriver "$DRIVER_PATH"
+
+  # חיפוש הקובץ chromedriver בתוך תיקיות המשנה
+  CHROMEDRIVER_BINARY=$(find chromedriver_temp -type f -name chromedriver)
+
+  if [[ -z "$CHROMEDRIVER_BINARY" ]]; then
+    echo "Error: chromedriver binary not found!"
+    exit 1
+  fi
+
+  sudo mv "$CHROMEDRIVER_BINARY" "$DRIVER_PATH"
   sudo chmod +x "$DRIVER_PATH"
   rm -rf "$ZIP_NAME" chromedriver_temp
 else
@@ -61,6 +70,7 @@ if [[ ! -L "$SYMLINK_PATH" || "$(readlink $SYMLINK_PATH)" != "$DRIVER_PATH" ]]; 
 else
   echo "Symlink for ChromeDriver already correct."
 fi
+
 
 
 # Firefox 130.0.1
