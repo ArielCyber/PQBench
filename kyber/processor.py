@@ -114,7 +114,7 @@ def open_firefox(algo):
 def open_chrome(algo):
     """
     Launch a Selenium WebDriver for Chrome with a given Algo.
-    Uses a specific Chrome binary based on the algo parameter:
+    Uses a specific Chrome binary and chromedriver based on the algo parameter:
     - algo 0 or 1: Chrome 128
     - algo 2: Chrome 138
     """
@@ -130,19 +130,19 @@ def open_chrome(algo):
     prefs = {"browser": {"enabled_labs_experiments": []}}
 
     if algo in [0, 1]:
-        # Non-PQC or Kyber-only — use Chrome 128
         prefs["browser"]["enabled_labs_experiments"] = [
             "enable-tls13-kyber@2",  # explicitly disabled
             "use-ml-kem@2"  # explicitly disabled
         ]
         chrome_path = "/Applications/Google Chrome 128.app/Contents/MacOS/Google Chrome for Testing"
+        chromedriver_path = "/usr/local/bin/chromedriver-128.0.6613.137"
     elif algo == 2:
-        # ML-KEM (PQC) — use Chrome 138
         prefs["browser"]["enabled_labs_experiments"] = [
             "enable-tls13-kyber@2",  # explicitly disabled
             "use-ml-kem@1"  # enabled
         ]
         chrome_path = "/Applications/Google Chrome 138.app/Contents/MacOS/Google Chrome for Testing"
+        chromedriver_path = "/usr/local/bin/chromedriver-138.0.7204.183"
     else:
         raise ValueError(f"Unknown algorithm value: {algo}")
 
@@ -150,12 +150,12 @@ def open_chrome(algo):
     chrome_opts.binary_location = chrome_path
 
     try:
-        chromedriver_path = os.environ.get("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
         service = ChromeService(executable_path=chromedriver_path)
         return webdriver.Chrome(options=chrome_opts, service=service)
     except WebDriverException as e:
         logging.critical(e)
         raise BrowserLaunchError("Failed to open Chrome: is Chrome installed and the driver up to date?") from e
+
 
 
 def process_session(browser: str, algo: int, amount: int, domain: str):
