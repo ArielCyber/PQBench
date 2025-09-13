@@ -68,26 +68,25 @@ else
   echo "Symlink for ChromeDriver already correct."
 fi
 
-# Install Firefox 142
-FIREFOX_VERSION="142.0.1"
-FIREFOX_APP_NAME="Firefox 142.app"
-if [[ "$ARCH" == "arm64" ]]; then
-  FIREFOX_URL="https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/mac-aarch64/en-US/Firefox%20${FIREFOX_VERSION}.dmg"
+
+# Firefox 142.0.1
+FIREFOX_APP="/Applications/Firefox 142.app"
+if [ ! -d "$FIREFOX_APP" ]; then
+  echo "Downloading Firefox 142.0.1..."
+  FIREFOX_URL="https://download.mozilla.org/?product=firefox-142.0.1-ssl&os=osx&lang=en-US"
+  curl -L -o firefox.dmg "$FIREFOX_URL"
+  echo "Mounting Firefox..."
+  hdiutil attach firefox.dmg -nobrowse
+  echo "Copying Firefox to /Applications..."
+  cp -r /Volumes/Firefox/Firefox.app "$FIREFOX_APP"
+  echo "Unmounting Firefox..."
+  hdiutil detach /Volumes/Firefox
+  echo "Cleaning up..."
+  rm -f firefox.dmg
 else
-  FIREFOX_URL="https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/mac/en-US/Firefox%20${FIREFOX_VERSION}.dmg"
+  echo "Firefox 142.0.1 already installed."
 fi
 
-if [ ! -d "/Applications/$FIREFOX_APP_NAME" ]; then
-  echo "Installing Firefox $FIREFOX_VERSION..."
-  curl -L -o firefox.dmg "$FIREFOX_URL"
-  hdiutil attach firefox.dmg
-  cp -r "/Volumes/Firefox/Firefox.app" "$FIREFOX_APP_NAME"
-  hdiutil detach "/Volumes/Firefox"
-  sudo mv "$FIREFOX_APP_NAME" "/Applications/"
-  rm firefox.dmg
-else
-  echo "Firefox $FIREFOX_VERSION already installed."
-fi
 
 # Geckodriver
 GECKO_TARGET="/usr/local/bin/geckodriver"
