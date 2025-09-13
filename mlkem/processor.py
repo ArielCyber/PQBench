@@ -29,7 +29,7 @@ def root():
     Response
         The contents of 'kyber_page.html' from the static folder.
     """
-    return app.send_static_file('kyber_page.html')
+    return app.send_static_file('mlkem_page.html')
 
 
 def open_browser(browser: str, algo: int):
