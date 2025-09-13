@@ -82,29 +82,25 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
     fi
 
     ZIP_NAME="chromedriver-${ARCH}.zip"
-    DOWNLOAD_URL="https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${DRIVER_VERSION}/${ARCH}/${ZIP_NAME}"
+    DOWNLOAD_URL="https://repo.huaweicloud.com/chromedriver/${DRIVER_VERSION}/${ZIP_NAME}"
 
-    # Download with headers to mimic browser
-    curl -L -o "${ZIP_NAME}" "${DOWNLOAD_URL}" \
-      -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" \
-      -H "Accept: */*" \
-      -H "Connection: keep-alive"
+    # Download with fake browser header
+    curl -L -A "Mozilla/5.0" -o "${ZIP_NAME}" "${DOWNLOAD_URL}"
 
     if [[ $? -ne 0 ]]; then
-      echo "❌ Failed to download ChromeDriver for version $VERSION. Skipping..."
+      echo "Failed to download ChromeDriver for version $VERSION. Skipping..."
       continue
     fi
 
     # Unzip
     unzip -q "${ZIP_NAME}"
 
-    # Move binary from nested folder (new Google format)
-    if [[ -f chromedriver-${ARCH}/chromedriver ]]; then
-      sudo mv "chromedriver-${ARCH}/chromedriver" "$DRIVER_PATH"
+    # Move binary from current dir (Huawei format is flat)
+    if [[ -f chromedriver ]]; then
+      sudo mv chromedriver "$DRIVER_PATH"
       sudo chmod +x "$DRIVER_PATH"
-      rm -rf "chromedriver-${ARCH}"
     else
-      echo "⚠️ chromedriver binary not found after unzip for version $VERSION"
+      echo "chromedriver binary not found after unzip for version $VERSION"
       continue
     fi
 
@@ -112,9 +108,6 @@ for VERSION in "${CHROME_VERSIONS[@]}"; do
     rm -f "${ZIP_NAME}"
   fi
 done
-
-
-
 
 
 # Define Firefox versions
