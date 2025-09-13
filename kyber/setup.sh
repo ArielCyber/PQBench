@@ -39,33 +39,40 @@ fi
 
 # ChromeDriver 128
 DRIVER_PATH="/usr/local/bin/chromedriver-${CHROME_VERSION}"
+SYMLINK_PATH="/usr/local/bin/chromedriver"
+
 if [[ ! -f "$DRIVER_PATH" ]]; then
   echo "Installing ChromeDriver version $CHROME_VERSION..."
   ZIP_NAME="chromedriver-${CHROME_ARCH}.zip"
-  DL_URL="https://repo.huaweicloud.com/chromedriver/${CHROME_VERSION}/${ZIP_NAME}"
-  curl -L -A "Mozilla/5.0" -o "$ZIP_NAME" "$DL_URL"
-  unzip -q "$ZIP_NAME"
-  sudo mv chromedriver "$DRIVER_PATH"
+  DL_URL="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/${CHROME_ARCH}/chromedriver-${CHROME_ARCH}.zip"
+  curl -L -o "$ZIP_NAME" "$DL_URL"
+  unzip -q "$ZIP_NAME" -d chromedriver_temp
+  sudo mv chromedriver_temp/chromedriver "$DRIVER_PATH"
   sudo chmod +x "$DRIVER_PATH"
-  rm "$ZIP_NAME"
+  rm -rf "$ZIP_NAME" chromedriver_temp
 else
   echo "ChromeDriver version $CHROME_VERSION already installed."
 fi
+
+# Create or update symlink to match processor.py default path
+if [[ ! -L "$SYMLINK_PATH" || "$(readlink $SYMLINK_PATH)" != "$DRIVER_PATH" ]]; then
+  echo "Linking $SYMLINK_PATH to $DRIVER_PATH..."
+  sudo ln -sf "$DRIVER_PATH" "$SYMLINK_PATH"
+else
+  echo "Symlink for ChromeDriver already correct."
+fi
+
 
 # Firefox 130.0.1
 FIREFOX_APP="/Applications/Firefox.app"
 if [ ! -d "$FIREFOX_APP" ]; then
   echo "Downloading Firefox 130.0.1..."
-  if [[ "$ARCH" == "arm64" ]]; then
-    FIREFOX_URL="https://download.mozilla.org/?product=firefox-130.0.1-ssl&os=osx&lang=en-US"
-  else
-    FIREFOX_URL="https://download.mozilla.org/?product=firefox-130.0.1-ssl&os=osx&lang=en-US&type=dmg"
-  fi
+  FIREFOX_URL="https://download.mozilla.org/?product=firefox-130.0.1-ssl&os=osx&lang=en-US"
   curl -L -o firefox.dmg "$FIREFOX_URL"
   echo "Mounting Firefox..."
   hdiutil attach firefox.dmg -nobrowse
   echo "Copying Firefox to /Applications..."
-  cp -r /Volumes/Firefox/Firefox.app /Applications/
+  cp -r /Volumes/Firefox/Firefox.app /Applications/Firefox\ 130.app
   echo "Unmounting Firefox..."
   hdiutil detach /Volumes/Firefox
   echo "Cleaning up..."
