@@ -4,13 +4,13 @@ services:
     image: switcher:latest
     container_name: switcher_container
     command: >
-      gunicorn -w 2 -k gthread --threads 4 -t 120 -b 0.0.0.0:8080
+      gunicorn -w 2 -k gthread --threads 4 -t 120 -b 0.0.0.0:5000
       --access-logfile - --error-logfile -
       switcher:app
 
-    ports: [ "8080:8080" ]
+    ports: [ "5000:5000" ]
     environment:
-      SNIFFER_URL: "http://172.18.0.1:5000"
+      SNIFFER_URL: "http://172.18.0.1:8080"
       URL_LINUX_KYBER: "http://linux-kyber:5000"
       URL_LINUX_MLKEM: "http://linux-mlkem:5000"
       URL_WIN_KYBER: "http://win-kyber:5000"
@@ -24,7 +24,7 @@ services:
       SNIFFER_DURATION_SEC: "30"
 
     healthcheck:
-      test: [ "CMD", "curl", "-fsS", "http://localhost:8080/health" ]
+      test: [ "CMD", "curl", "-fsS", "http://localhost:5000/health" ]
       interval: 60s
       timeout: 3s
       retries: 5
@@ -76,7 +76,7 @@ services:
     image: agent:latest
     container_name: agent_container
     environment:
-      ENTRY_CONTROLLER_URL: "http://switcher:8080/config"
+      ENTRY_CONTROLLER_URL: "http://switcher:5000/config"
       INTERVAL_SEC: "60"        # change cadence if you want
     restart: unless-stopped
     networks: [appnet]
@@ -85,7 +85,7 @@ services:
     build:
       context: ./sniffer
     container_name: sniffer_container
-    command: uvicorn sniffer:app --host 0.0.0.0 --port 5000
+    command: uvicorn sniffer:app --host 0.0.0.0 --port 8080
     network_mode: "host"
     cap_add:
       - NET_ADMIN

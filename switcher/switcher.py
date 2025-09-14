@@ -7,7 +7,7 @@ import os, socket
 from urllib.parse import urlparse
 
 # Sniffer config (env-driven)
-SNIFFER_URL = os.getenv("SNIFFER_URL", "http://172.18.0.1:5000")
+SNIFFER_URL = os.getenv("SNIFFER_URL", "http://172.18.0.1:8080")
 SNIFFER_IFACE = os.getenv("SNIFFER_IFACE", None)  # e.g., "pqbench0" or None to let sniffer default
 SNIFFER_FILTER_MODE = os.getenv("SNIFFER_FILTER_MODE", "domain")  # "none" | "domain" | "custom"
 SNIFFER_DOMAIN = os.getenv("SNIFFER_DOMAIN", "pq.cloudflareresearch.com")
@@ -143,17 +143,6 @@ def config_handler():
         target_base = Containers[target_key].rstrip("/")
         url = f"{target_base}{TARGET_ENDPOINT}"  # e.g. container_name/run
 
-        # forward info to the chosen container
-        info = {
-            "os": opsys,
-            "browser": browser,
-            "algorithm": algo_raw,
-            "sessions": sessions
-        }
-
-        logging.debug(f"Request sent to: {url}")
-        resp = requests.post(url, json=info, timeout=60)
-
         # resolve backend container IP (for sniffer target)
         logging.debug("Get container IP")
         backend_ip = _resolve_service_ip(target_base)
@@ -169,6 +158,17 @@ def config_handler():
             iface=None,               # will fall back to env SNIFFER_IFACE
             domain=None,              # env default
         )
+
+        # forward info to the chosen container
+        info = {
+            "os": opsys,
+            "browser": browser,
+            "algorithm": algo_raw,
+            "sessions": sessions
+        }
+
+        logging.debug(f"Request sent to: {url}")
+        resp = requests.post(url, json=info, timeout=60)
 
         # 4) Relay a combined response
         try:
