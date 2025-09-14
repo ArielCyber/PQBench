@@ -24,7 +24,7 @@ services:
       SNIFFER_DURATION_SEC: "30"
 
     healthcheck:
-      test: [ "CMD", "curl", "-fsS", "http://localhost:5000/health" ]
+      test: [ "CMD", "curl", "-fsS", "http://localhost:8080/health" ]
       interval: 60s
       timeout: 3s
       retries: 5
@@ -70,7 +70,7 @@ services:
     image: agent:latest
     container_name: agent_container
     environment:
-      ENTRY_CONTROLLER_URL: "http://switcher:5000/config"
+      ENTRY_CONTROLLER_URL: "http://switcher:8080/config"
       INTERVAL_SEC: "60"        # change cadence if you want
     restart: unless-stopped
     networks: [appnet]
