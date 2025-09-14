@@ -7,7 +7,7 @@ import os, socket
 from urllib.parse import urlparse
 
 # Sniffer config (env-driven)
-SNIFFER_URL = os.getenv("SNIFFER_URL", "http://host.docker.internal:7000")
+SNIFFER_URL = os.getenv("SNIFFER_URL", "http://sniffer:5000")
 SNIFFER_IFACE = os.getenv("SNIFFER_IFACE", None)  # e.g., "pqbench0" or None to let sniffer default
 SNIFFER_FILTER_MODE = os.getenv("SNIFFER_FILTER_MODE", "domain")  # "none" | "domain" | "custom"
 SNIFFER_DOMAIN = os.getenv("SNIFFER_DOMAIN", "pq.cloudflareresearch.com")
@@ -273,8 +273,15 @@ def done_handler():
 
     # --- Forward to sniffer /done ---
     try:
-        chosen = choose_container(os_name, algo)
-        payload = {"url": chosen["url"]}
+        key = choose_container(os_name, "kyber" if algo in ("kyber", 1) else ("mlkem" if algo in ("mlkem", 2) else "non-pqc"))
+        base_url = Containers[key].rstrip("/")
+        backend_ip = _resolve_service_ip(base_url)
+
+        payload = {
+            # send both; sniffer prefers container_ip, can fall back to url
+            "container_ip": backend_ip,
+            "url": base_url
+        }
 
         sniffer_resp = requests.post(
             f"{SNIFFER_URL}/done",

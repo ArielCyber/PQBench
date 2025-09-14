@@ -1,6 +1,6 @@
 from typing import Optional, List
 from dataclasses import dataclass
-from pydantic import BaseModel, Field, IPvAnyAddress, constr
+from pydantic import BaseModel, Field, IPvAnyAddress, constr, AnyUrl
 
 # --- types.py (or keep inside sniffer.py if you prefer one file) ---
 from typing import Optional, List, Literal
@@ -52,3 +52,7 @@ class ChildSession:
     done: bool = False
     packets: int = 0
     error: Optional[str] = None
+
+class DoneRequest(BaseModel):
+    container_ip: Optional[IPvAnyAddress] = None
+    url: Optional[AnyUrl] = None

@@ -5,9 +5,12 @@ import subprocess
 import threading
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException
+from urllib.parse import urlparse
+
+from fastapi import FastAPI, HTTPException, Body
 from scapy.all import AsyncSniffer, wrpcap, get_if_list  # uses libpcap under the hood
 from sessions import *
 from threading import Event
@@ -23,7 +26,32 @@ ranges/custom), can intersect with TCP ports, and optionally splits TCP streams
 with tshark into per-stream PCAPs.
 """
 
-app = FastAPI(title="PQBench Sniffer", version="0.1.1")
+
+# ---------- Lifespan: logs interfaces at startup ----------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- startup ---
+    log.info("Startup: initializing sniffer service...")
+    try:
+        ifaces = get_if_list()
+        log.debug(f"Visible interfaces at startup: {ifaces}")
+    except Exception as e:
+        log.exception(f"Failed to list interfaces at startup: {e}")
+
+    yield  # --- app runs here --- everything before yield is on startup, everything after is on shutdown
+
+    # --- shutdown ---
+    try:
+        with _lock:
+            still_running = [sid for sid, cs in _sessions.items() if not cs.done]
+        if still_running:
+            log.warning("Shutdown with %d active sessions: %s", len(still_running), still_running)
+            # If you added stop-events/handles, you could signal them here.
+    except Exception as e:
+        log.exception("Shutdown cleanup failed: %s", e)
+
+
+app = FastAPI(title="PQBench Sniffer", version="0.1.1", lifespan=lifespan)
 
 # --------- Logging ----------
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG").upper()
@@ -44,13 +72,18 @@ _active = {"running": False, "started_at": None, "target_ip": None, "outfile": N
 # All child sessions keyed by session_id
 _sessions: dict[str, ChildSession] = {}
 
+# Track live sniffers and their stop signals
+_sniffer_handles: dict[str, AsyncSniffer] = {}
+_stop_events: dict[str, Event] = {}
+
 # remember the most recent parent run (for convenience in /status)
 _last_parent = {"session_dir": None, "children": []}
 
 
 # ---------- Helpers ----------
 def _resolve_domain_ips(hostname: str) -> tuple[list[str], list[str]]:
-    """Resolve a domain to unique IPv4/IPv6 addresses.
+    """
+    Resolve a domain to unique IPv4/IPv6 addresses.
 
     Parameters:
         hostname: The FQDN to resolve.
@@ -82,7 +115,8 @@ def _resolve_domain_ips(hostname: str) -> tuple[list[str], list[str]]:
 
 
 def _build_domain_bpf(container_ip: str, domain_v4: List[str], domain_v6: List[str]) -> str:
-    """Build a bidirectional BPF limited to a container IP and a domain's IPs.
+    """
+    Build a bidirectional BPF limited to a container IP and a domain's IPs.
 
     Produces a filter of the form:
     ``(host <container_ip>) and ((ip and (...v4...)) or (ip6 and (...v6...)))``.
@@ -116,7 +150,8 @@ def _build_domain_bpf(container_ip: str, domain_v4: List[str], domain_v6: List[s
 
 
 def name_dir(os_name: str, browser: str, algo: int) -> str:
-    """Encode OS, browser, and algorithm into a 3-digit session code.
+    """
+    Encode OS, browser, and algorithm into a 3-digit session code.
 
     Mapping:
         OS: linux=1, windows=2, macos=3
@@ -149,7 +184,8 @@ def name_dir(os_name: str, browser: str, algo: int) -> str:
 
 
 def _and_ports(bpf: str, ports_csv: Optional[str]) -> str:
-    """AND a TCP port clause with an existing BPF, if ports were supplied.
+    """
+    AND a TCP port clause with an existing BPF, if ports were supplied.
 
     Args:
         bpf: Base BPF string.
@@ -301,6 +337,13 @@ def _split_streams_tshark(input_pcap: str, output_dir: str, dir_code, timestamp,
         log.exception(f"Unexpected error during stream split: {e}")
 
 
+def _resolve_ip_from_url(url: str) -> str:
+    host = urlparse(url).hostname
+    if not host:
+        raise ValueError(f"Invalid url: {url}")
+    return socket.gethostbyname(host)
+
+
 def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | None = None):
     child_session = _sessions.get(session_id)
     if not child_session:
@@ -308,23 +351,33 @@ def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | N
     log.info(
         f"[{session_id}] Capture start: ip={child_session.container_ip} iface={child_session.iface} outfile={child_session.outfile}")
     log.debug(f"[{session_id}] BPF: {child_session.bpf}")
+    stop_evt = _stop_events.get(session_id)
+
     try:
         sniffer = AsyncSniffer(iface=child_session.iface, filter=child_session.bpf, store=True)
+        _sniffer_handles[session_id] = sniffer
         sniffer.start()
         if armed_evt is not None:
             armed_evt.set()  # signal: sniffer armed
-        time.sleep(duration)
+
+        # Wait until duration elapses OR someone calls /done (stop_evt.set())
+        if stop_evt is not None:
+            stop_evt.wait(timeout=duration)
+        else:
+            time.sleep(duration)
+
         packets = sniffer.stop()
         child_session.packets = len(packets) if packets is not None else 0
         if child_session.packets == 0:
             log.warning(f"[{session_id}] 0 packets captured")
         wrpcap(child_session.outfile, packets)
         log.info(f"[{session_id}] wrote {child_session.outfile}")
+
         if child_session.packets > 0:
             _split_streams_tshark(
                 input_pcap=child_session.outfile,
-                output_dir=os.path.join(child_session.child_dir, "streams"),  # e.g. /output/120/session-.../streams
-                dir_code=child_session.code,  # e.g. "120"
+                output_dir=os.path.join(child_session.child_dir, "streams"),
+                dir_code=child_session.code,
                 timestamp=timestamp,
                 min_packets=30,
                 require_serverhello=True,
@@ -336,6 +389,8 @@ def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | N
         log.exception(f"[{session_id}] capture error: {e}")
     finally:
         child_session.done = True
+        _sniffer_handles.pop(session_id, None)
+        _stop_events.pop(session_id, None)
 
 
 @app.post("/start", response_model=StartResponseMulti)
@@ -362,7 +417,7 @@ def start_batch(request: StartBatchRequest):
         seen.add(key)
 
         # Validate interface *per target*
-        iface = target.iface or "any"
+        iface = str(target.iface) or "any"
         if iface != "any":
             visible = set(get_if_list())
             if iface not in visible:
@@ -393,7 +448,7 @@ def start_batch(request: StartBatchRequest):
         bpf = _and_ports(bpf, target.ports)
 
         # Register session
-        sid = uuid.uuid4().hex[:12]
+        sid = uuid.uuid4().hex[:12] # Creates a short unique ID for each capture session, uuid.uuid4() generates a random UUID, .hex transfers it to a UUID 32 char hexa string, and [:12] takes only the first 12 chars
         cs = ChildSession(
             session_id=sid,
             container_ip=ip,
@@ -406,8 +461,10 @@ def start_batch(request: StartBatchRequest):
             duration_sec=target.duration_sec,
             session_count=getattr(target, "session_count", 1),
         )
+
         with _lock:
             _sessions[sid] = cs
+            _stop_events[sid] = Event()
 
         # Start thread and wait until "armed"
         armed = Event()
@@ -418,18 +475,6 @@ def start_batch(request: StartBatchRequest):
         children.append(asdict(cs))
 
     return StartResponseMulti(started=True, children=children)
-
-
-# ---------- Lifespan: logs interfaces at startup ----------
-@app.on_event("startup")
-def _startup():
-    """FastAPI startup hook: logs visible interfaces for diagnostics."""
-    log.info("Startup: initializing sniffer service...")
-    try:
-        ifaces = get_if_list()
-        log.debug(f"Visible interfaces at startup: {ifaces}")
-    except Exception as e:
-        log.exception(f"Failed to list interfaces at startup: %s", e)
 
 
 @app.get("/health")
@@ -445,7 +490,8 @@ def health():
 
 @app.get("/ifaces")
 def list_ifaces() -> List[str]:
-    """Return the list of interfaces visible inside the container.
+    """
+    Return the list of interfaces visible inside the container.
 
     Returns:
         A list of interface names (e.g., ``["lo", "eth0"]``).
@@ -459,5 +505,45 @@ def list_ifaces() -> List[str]:
 def status():
     with _lock:
         return StatusAllResponse(
-            sessions=[asdict(cs) for cs in _sessions.values()]
-        )
+            sessions=[asdict(cs) for cs in _sessions.values()])
+
+
+@app.post("/done")
+def done(req: DoneRequest = Body(...)):
+    """
+    Stop all active sessions that match the given container.
+    Priority: container_ip (if provided) > resolve from url.
+    Returns a list of session_ids that were signaled to stop.
+    """
+    try:
+        if req.container_ip:
+            target_ip = str(req.container_ip)
+        elif req.url:
+            target_ip = _resolve_ip_from_url(str(req.url))
+        else:
+            raise HTTPException(status_code=400, detail="container_ip or url required")
+
+        to_stop: list[str] = []
+        with _lock:
+            for sid, cs in _sessions.items():
+                if cs.container_ip == target_ip and not cs.done:
+                    to_stop.append(sid)
+
+        stopped: list[str] = []
+        for sid in to_stop:
+            evt = _stop_events.get(sid)
+            if evt and not evt.is_set():
+                evt.set()
+                stopped.append(sid)
+
+        return {
+            "ok": True,
+            "container_ip": target_ip,
+            "stopped_session_ids": stopped,
+            "active_count": len(stopped)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("/done error: %s", e)
+        raise HTTPException(status_code=500, detail="internal error")
