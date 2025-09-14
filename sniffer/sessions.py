@@ -19,7 +19,7 @@ class TargetSpec(BaseModel):
 
     # capture options (per-target)
     duration_sec: int = Field(5, ge=1, le=3600)
-    iface: Optional[str] = "any"
+    iface: Optional[str] = "pqbench0"
 
     # filter options (per-target)
     filter_mode: Literal["none","domain","custom"] = "domain"

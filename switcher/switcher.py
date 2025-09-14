@@ -237,7 +237,7 @@ def _start_sniffer_for_target(
                 "session_count": sessions,
                 # per-target options
                 "filter_mode": "domain",
-                "iface": "pqbench0",
+                "iface": iface,
                 "domain": domain if (filter_mode or SNIFFER_FILTER_MODE) == "domain" else None,
                 #"ports": ports or SNIFFER_PORTS,
                 # "custom_bpf": "...",               # only if you use filter_mode="custom"
