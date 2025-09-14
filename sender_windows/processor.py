@@ -17,6 +17,29 @@ from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.firefox import GeckoDriverManager
+import os, sys, time
+import certifi
+
+os.environ.pop("REQUESTS_CA_BUNDLE", None)
+os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+os.environ["SSL_CERT_FILE"] = certifi.where()
+
+
+def _wait_https_ready(url="https://www.google.com", timeout_s=120):
+    """Block until outbound HTTPS works; avoids early TLS errors."""
+    t0 = time.time()
+    delay = 2
+    while time.time() - t0 < timeout_s:
+        try:
+            requests.get(url, timeout=5, verify=certifi.where())
+            logging.debug("Request succeeded")
+            return True
+        except Exception:
+            logging.debug(f"Request timed out: {url}")
+            time.sleep(delay)
+            delay = min(delay * 1.5, 10)
+    return False
+
 
 app = Flask(__name__)
 
@@ -150,7 +173,7 @@ def open_browser(browser: str, algo: int):
     BrowserLaunchError
         If the driver fails to start or browser is not installed.
     """
-
+    _wait_https_ready()
     try:
         if browser.lower() == 'chrome':
             return open_chrome(algo)
@@ -321,7 +344,7 @@ def root():
     return None
 
 
-@app.route('/config', methods=['POST'])
+@app.route('/execute', methods=['POST'])
 def config_handler():
     """
     Flask endpoint to initiate a PQClass session based on client config.

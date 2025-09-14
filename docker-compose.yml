@@ -20,7 +20,6 @@ services:
       SNIFFER_IFACE: "pqbench0"                # optional, matches your sniffer env
       SNIFFER_FILTER_MODE: "domain"            # or "none"/"custom"
       SNIFFER_DOMAIN: "pq.cloudflareresearch.com"
-      SNIFFER_PORTS: "443"
       SNIFFER_DURATION_SEC: "30"
 
     healthcheck:
@@ -29,8 +28,6 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks: [appnet]
 
   linux-kyber:
@@ -42,8 +39,6 @@ services:
     ports:
       - "5001:5000"
     networks: [appnet]
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:5000/health || curl -fsS http://localhost:5000/ || exit 1" ]
       interval: 10s
@@ -60,8 +55,6 @@ services:
     ports:
       - "5002:5000"
     networks: [appnet]
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:5000/health || curl -fsS http://localhost:5000/ || exit 1" ]
       interval: 10s

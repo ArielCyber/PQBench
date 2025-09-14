@@ -26,14 +26,14 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 
 Containers = {
     # compose service names can be used as hosts
-    "linux_kyber":  os.getenv("URL_LINUX_KYBER",  "http://linux-kyber:5000"),
-    "linux_mlkem":  os.getenv("URL_LINUX_MLKEM",  "http://linux-mlkem:5000"),
+    "linux_kyber": os.getenv("URL_LINUX_KYBER", "http://linux-kyber:5000"),
+    "linux_mlkem": os.getenv("URL_LINUX_MLKEM", "http://linux-mlkem:5000"),
 
-    "windows_kyber": os.getenv("URL_WINDOWS_KYBER", "http://windows-kyber:5000"),
-    "windows_mlkem": os.getenv("URL_WINDOWS_MLKEM", "http://windows-mlkem:5000"),
+    "windows_kyber": os.getenv("URL_WIN_KYBER", "http://win-kyber:5000"),
+    "windows_mlkem": os.getenv("URL_WIN_MLKEM", "http://win-mlkem:5000"),
 
-    "macos_kyber":  os.getenv("URL_MACOS_KYBER",  "http://macos-kyber:5000"),
-    "macos_mlkem":  os.getenv("URL_MACOS_MLKEM",  "http://macos-mlkem:5000"),
+    "macos_kyber": os.getenv("URL_MACOS_KYBER", "http://macos-kyber:5000"),
+    "macos_mlkem": os.getenv("URL_MACOS_MLKEM", "http://macos-mlkem:5000"),
 }
 
 TARGET_ENDPOINT = "/execute"
@@ -154,9 +154,9 @@ def config_handler():
             sessions=sessions,
             browser=browser,
             algo_name=algo,
-            duration_sec=30,        # or map from your payload if you add it
-            iface=None,               # will fall back to env SNIFFER_IFACE
-            domain=None,              # env default
+            duration_sec=60,  # or map from your payload if you add it
+            iface=None,  # will fall back to env SNIFFER_IFACE
+            domain=None,  # env default
         )
 
         # forward info to the chosen container
@@ -168,7 +168,7 @@ def config_handler():
         }
 
         logging.debug(f"Request sent to: {url}")
-        resp = requests.post(url, json=info, timeout=60)
+        resp = requests.post(url, json=info, timeout=120)
 
         # 4) Relay a combined response
         try:
@@ -208,16 +208,16 @@ def _resolve_service_ip(service_url: str) -> str:
 
 
 def _start_sniffer_for_target(
-    container_ip: str,
-    opsys: str,
-    browser: str,
-    algo_name: str,
-    sessions: int,
-    duration_sec: int | None = None,
-    iface: str | None = None,
-    filter_mode: str | None = None,
-    domain: str | None = None,
-    ports: str | None = None,
+        container_ip: str,
+        opsys: str,
+        browser: str,
+        algo_name: str,
+        sessions: int,
+        duration_sec: int | None = None,
+        iface: str | None = None,
+        filter_mode: str | None = None,
+        domain: str | None = None,
+        ports: str | None = None,
 ):
     """
     Build a single-target StartBatchRequest and POST it to the sniffer.
@@ -229,17 +229,17 @@ def _start_sniffer_for_target(
     payload = {
         "targets": [
             {
-                "os": opsys,                         # "linux" | "windows" | "macos"
-                "browser": browser,                  # "chrome" | "firefox"
-                "algo": algo_code,                   # 0/1/2
-                "container_ip": container_ip,        # e.g., "172.19.0.5"
+                "os": opsys,  # "linux" | "windows" | "macos"
+                "browser": browser,  # "chrome" | "firefox"
+                "algo": algo_code,  # 0/1/2
+                "container_ip": container_ip,  # e.g., "172.19.0.5"
                 "duration_sec": duration_sec or SNIFFER_DURATION_SEC_DEFAULT,
                 "session_count": sessions,
                 # per-target options
                 "filter_mode": "domain",
                 "iface": iface,
                 "domain": domain if (filter_mode or SNIFFER_FILTER_MODE) == "domain" else None,
-                #"ports": ports or SNIFFER_PORTS,
+                # "ports": ports or SNIFFER_PORTS,
                 # "custom_bpf": "...",               # only if you use filter_mode="custom"
             }
         ]
@@ -274,7 +274,8 @@ def done_handler():
 
     # --- Forward to sniffer /done ---
     try:
-        key = choose_container(os_name, "kyber" if algo in ("kyber", 1) else ("mlkem" if algo in ("mlkem", 2) else "non-pqc"))
+        key = choose_container(os_name,
+                               "kyber" if algo in ("kyber", 1) else ("mlkem" if algo in ("mlkem", 2) else "non-pqc"))
         base_url = Containers[key].rstrip("/")
         backend_ip = _resolve_service_ip(base_url)
 
@@ -302,8 +303,6 @@ def done_handler():
         "received": data,
         "sniffer": sniffer_reply
     })
-
-
 
 
 if __name__ == "__main__":
