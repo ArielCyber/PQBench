@@ -79,7 +79,7 @@ services:
     build:
       context: ./sniffer
     container_name: sniffer_container
-    # REMOVE: network_mode: host
+    command: uvicorn sniffer:app --host 0.0.0.0 --port 5000
     networks: [appnet]
     ports: ["5000:5000"]     # expose to host (optional)
     cap_add:
@@ -89,7 +89,6 @@ services:
     environment:
       OUTPUT_ROOT: /output
       LOG_LEVEL: DEBUG
-      IFACE: eth0
     volumes:
       - ./output:/output
     healthcheck:

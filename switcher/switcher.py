@@ -165,7 +165,7 @@ def config_handler():
             browser=browser,
             algo_name=algo,
             duration_sec=None,        # or map from your payload if you add it
-            iface="eth0",               # will fall back to env SNIFFER_IFACE
+            iface="pqbench0",               # will fall back to env SNIFFER_IFACE
             filter_mode=None,         # env default
             domain=None,              # env default
             ports=None,               # env default
