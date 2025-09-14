@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
         log.exception("Shutdown cleanup failed: %s", e)
 
 
-app = FastAPI(title="PQBench Sniffer", version="0.1.1", lifespan=lifespan)
+app = FastAPI(title="PQBench Sniffer", version="0.1.2", lifespan=lifespan)
 
 # --------- Logging ----------
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG").upper()
@@ -448,7 +448,8 @@ def start_batch(request: StartBatchRequest):
         bpf = _and_ports(bpf, target.ports)
 
         # Register session
-        sid = uuid.uuid4().hex[:12] # Creates a short unique ID for each capture session, uuid.uuid4() generates a random UUID, .hex transfers it to a UUID 32 char hexa string, and [:12] takes only the first 12 chars
+        sid = uuid.uuid4().hex[
+            :12]  # Creates a short unique ID for each capture session, uuid.uuid4() generates a random UUID, .hex transfers it to a UUID 32 char hexa string, and [:12] takes only the first 12 chars
         cs = ChildSession(
             session_id=sid,
             container_ip=ip,

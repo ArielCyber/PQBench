@@ -10,9 +10,9 @@ services:
 
     ports: [ "8080:8080" ]
     environment:
+      SNIFFER_URL: "http://172.18.0.1:5000"
       URL_LINUX_KYBER: "http://linux-kyber:5000"
       URL_LINUX_MLKEM: "http://linux-mlkem:5000"
-      SNIFFER_URL: "http://sniffer:5000"
       URL_WIN_KYBER: "http://win-kyber:5000"
       URL_WIN_MLKEM: "http://win-mlkem:5000"
       # add the rest when they are ready
@@ -29,6 +29,8 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks: [appnet]
 
   linux-kyber:
@@ -40,6 +42,8 @@ services:
     ports:
       - "5001:5000"
     networks: [appnet]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:5000/health || curl -fsS http://localhost:5000/ || exit 1" ]
       interval: 10s
@@ -56,6 +60,8 @@ services:
     ports:
       - "5002:5000"
     networks: [appnet]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:5000/health || curl -fsS http://localhost:5000/ || exit 1" ]
       interval: 10s
@@ -80,8 +86,7 @@ services:
       context: ./sniffer
     container_name: sniffer_container
     command: uvicorn sniffer:app --host 0.0.0.0 --port 5000
-    networks: [appnet]
-    ports: ["5000:5000"]     # expose to host (optional)
+    network_mode: "host"
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -90,6 +95,7 @@ services:
       OUTPUT_ROOT: /output
       LOG_LEVEL: DEBUG
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # to inspect/exec into other containers
       - ./output:/output
     healthcheck:
       test: [ "CMD", "curl", "-fsS", "http://localhost:5000/health" ]

@@ -7,7 +7,7 @@ import os, socket
 from urllib.parse import urlparse
 
 # Sniffer config (env-driven)
-SNIFFER_URL = os.getenv("SNIFFER_URL", "http://sniffer:5000")
+SNIFFER_URL = os.getenv("SNIFFER_URL", "http://172.18.0.1:5000")
 SNIFFER_IFACE = os.getenv("SNIFFER_IFACE", None)  # e.g., "pqbench0" or None to let sniffer default
 SNIFFER_FILTER_MODE = os.getenv("SNIFFER_FILTER_MODE", "domain")  # "none" | "domain" | "custom"
 SNIFFER_DOMAIN = os.getenv("SNIFFER_DOMAIN", "pq.cloudflareresearch.com")
@@ -162,13 +162,12 @@ def config_handler():
         sniff_status, sniff_body = _start_sniffer_for_target(
             container_ip=backend_ip,
             opsys=opsys,
+            sessions=sessions,
             browser=browser,
             algo_name=algo,
-            duration_sec=None,        # or map from your payload if you add it
-            iface="pqbench0",               # will fall back to env SNIFFER_IFACE
-            filter_mode=None,         # env default
+            duration_sec=30,        # or map from your payload if you add it
+            iface=None,               # will fall back to env SNIFFER_IFACE
             domain=None,              # env default
-            ports=None,               # env default
         )
 
         # 4) Relay a combined response
@@ -213,6 +212,7 @@ def _start_sniffer_for_target(
     opsys: str,
     browser: str,
     algo_name: str,
+    sessions: int,
     duration_sec: int | None = None,
     iface: str | None = None,
     filter_mode: str | None = None,
@@ -234,11 +234,12 @@ def _start_sniffer_for_target(
                 "algo": algo_code,                   # 0/1/2
                 "container_ip": container_ip,        # e.g., "172.19.0.5"
                 "duration_sec": duration_sec or SNIFFER_DURATION_SEC_DEFAULT,
+                "session_count": sessions,
                 # per-target options
-                "iface": iface or SNIFFER_IFACE,
-                "filter_mode": (filter_mode or SNIFFER_FILTER_MODE),
+                "filter_mode": "domain",
+                "iface": "pqbench0",
                 "domain": domain if (filter_mode or SNIFFER_FILTER_MODE) == "domain" else None,
-                "ports": ports or SNIFFER_PORTS,
+                #"ports": ports or SNIFFER_PORTS,
                 # "custom_bpf": "...",               # only if you use filter_mode="custom"
             }
         ]
