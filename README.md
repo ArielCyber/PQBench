@@ -6,8 +6,14 @@ This project allows running a macOS Big Sur container inside Docker to perform P
 
 ## Installation and Usage Steps
 
-### 1. Install macOS Big Sur in Docker
-Run the following command once to pull and start macOS Big Sur in a new Docker container(*Using Docker-OSX):
+### 1. Create a Separate macOS Container for Each Mode
+This project uses [Docker-OSX](https://github.com/sickcodes/Docker-OSX) to run a full macOS Big Sur VM inside a Docker container.
+
+You must create **two separate containers**, one for `Kyber + Non-PQC`, and one for `MLKEM`, since each mode installs different versions of browsers.
+
+---
+
+### ➤ Create the Kyber Container
 
 ```bash
 docker run -it \
@@ -15,26 +21,63 @@ docker run -it \
     -p 50922:10022 \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -e "DISPLAY=${DISPLAY:-:0.0}" \
-    -e SHORTNAME=big-sur \
+    --name pqc-kyber \
     sickcodes/docker-osx:latest
 ```
 
-Afterwards, you can reuse the container with:
-
-```bash
-docker start -ai mymac
-```
-
----
-
-### 2. Project Directory
-Inside the macOS container, clone the correct branch from the repository:
+Inside the container:
 
 ```bash
 git clone -b MacOS-Container https://github.com/ArielCyber/PQBench.git
 cd PQBench
+chmod +x setup.sh
+MODE=kyber ./setup.sh
+```
+This will install the Python environment, dependencies, ChromeDriver, and Geckodriver.
+
+After that, you can start it again with:
+
+```bash
+docker start -ai pqc-kyber
 ```
 
+This container supports both `Kyber (1)` and `Non-PQC (0)` algorithms.
+
+---
+
+### ➤ Create the MLKEM Container
+
+```bash
+docker run -it \
+    --device /dev/kvm \
+    -p 50923:10023 \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -e "DISPLAY=${DISPLAY:-:0.0}" \
+    --name pqc-mlkem \
+    sickcodes/docker-osx:latest
+```
+
+Inside the container:
+
+```bash
+git clone -b MacOS-Container https://github.com/ArielCyber/PQBench.git
+cd PQBench
+chmod +x setup.sh
+MODE=mlkem ./setup.sh
+```
+This will install the Python environment, dependencies, ChromeDriver, and Geckodriver.
+
+After that, you can start it again with:
+
+```bash
+docker start -ai pqc-mlkem
+```
+
+This container is used only for `MLKEM (2)` algorithm.
+
+---
+
+### 2. Project Directory
 The project directory should contain the following files:
 
 - `setup.sh` – one-time installation script  
@@ -47,29 +90,15 @@ The project directory should contain the following files:
 
 ---
 
-### 3. One-Time Setup
-Run the setup script to prepare the environment:
-
-```bash
-chmod +x setup.sh
-MODE=kyber ./setup.sh      # To run setup in Kyber mode
-MODE=mlkem ./setup.sh      # To run setup in ML-KEM mode
-MODE=nonpqc ./setup.sh      # To run setup in Non PQC mode                # Defaults to Non-PQC mode if MODE not set
-```
-
-This will install the Python environment, dependencies, ChromeDriver, and Geckodriver.
-
----
-
-### 4. Running the Project
+### 3. Running the Project
 
 You now use `run.sh` with the environment variable `MODE`.
 
 ```bash
 chmod +x run.sh
-MODE=kyber ./run.sh      # To run in Kyber mode
-MODE=mlkem ./run.sh      # To run in ML-KEM mode
-MODE=nonpqc ./run.sh      # To run in Non PQC mode                # Defaults to Non-PQC mode if MODE not set
+MODE=kyber ./run.sh      # To run in Kyber mode(Kyber Container)
+MODE=mlkem ./run.sh      # To run in ML-KEM mode(MLKEM Container)
+MODE=nonpqc ./run.sh      # To run in Non PQC mode(Kyber Container)                # Defaults to Non-PQC mode if MODE not set
 ```
 
 ---
@@ -111,7 +140,7 @@ The files will be saved in the project directory inside the container.
   We use `sickcodes/docker-osx` to boot a macOS Big Sur 11.7.10 guest. You must complete the macOS first-boot setup once (step 1). Without finishing the OS setup, you won’t be able to reuse the container.
 
 - **Browser versions and OS support.**  
-  Google Chrome no longer supports Big Sur. We pin **Chrome 138.0.7204.184** and install a matching **ChromeDriver 138**. **Firefox 142.0.1** is used on macOS Big Sur.
+  Google Chrome no longer supports Big Sur. We pin **Chrome 138.0.7204.183** and install a matching **ChromeDriver 138**. **Firefox 142.0.1** is used on macOS Big Sur.
 
 - **Architecture matters (Intel vs Apple Silicon).**  
   Inside `docker-osx` the macOS guest typically reports **x86_64 (Intel)** even if your host is ARM.  
