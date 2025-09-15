@@ -21,6 +21,7 @@ docker run -it \
     -p 50922:10022 \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -e "DISPLAY=${DISPLAY:-:0.0}" \
+    -e SHORTNAME=big-sur \
     --name pqc-kyber \
     sickcodes/docker-osx:latest
 ```
@@ -50,11 +51,13 @@ This container supports both `Kyber (1)` and `Non-PQC (0)` algorithms.
 ```bash
 docker run -it \
     --device /dev/kvm \
-    -p 50923:10023 \
+    -p 50922:10022 \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -e "DISPLAY=${DISPLAY:-:0.0}" \
+    -e SHORTNAME=big-sur \
     --name pqc-mlkem \
     sickcodes/docker-osx:latest
+
 ```
 
 Inside the container:
