@@ -51,8 +51,10 @@ The project directory should contain the following files:
 Run the setup script to prepare the environment:
 
 ```bash
-chmod +x setup.sh run.sh
-./setup.sh
+chmod +x setup.sh
+MODE=kyber ./setup.sh      # To run setup in Kyber mode
+MODE=mlkem ./setup.sh      # To run setup in ML-KEM mode
+MODE=nonpqc ./setup.sh      # To run setup in Non PQC mode                # Defaults to Non-PQC mode if MODE not set
 ```
 
 This will install the Python environment, dependencies, ChromeDriver, and Geckodriver.
@@ -64,9 +66,10 @@ This will install the Python environment, dependencies, ChromeDriver, and Geckod
 You now use `run.sh` with the environment variable `MODE`.
 
 ```bash
-MODE=KYBER ./run.sh      # To run in Kyber mode
-MODE=MLKEM ./run.sh      # To run in ML-KEM mode
-./run.sh                 # Defaults to Non-PQC mode if MODE not set
+chmod +x run.sh
+MODE=kyber ./run.sh      # To run in Kyber mode
+MODE=mlkem ./run.sh      # To run in ML-KEM mode
+MODE=nonpqc ./run.sh      # To run in Non PQC mode                # Defaults to Non-PQC mode if MODE not set
 ```
 
 ---

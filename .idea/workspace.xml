@@ -4,9 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="cf6a7724-a771-4b0b-ab60-4e871226e0b5" name="Changes" comment="updated PQC/NonPQC support">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-    </list>
+    <list default="true" id="cf6a7724-a771-4b0b-ab60-4e871226e0b5" name="Changes" comment="merging processor and setup to one file + readme" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -265,7 +263,15 @@
       <option name="project" value="LOCAL‎" />
       <updated>1757926427437</updated>
     </task>
-    <option name="localTasksCounter" value="25" />
+    <task id="LOCAL‎-00025" summary="merging processor and setup to one file + readme">
+      <option name="closed" value="true" />
+      <created>1757931833446</created>
+      <option name="number" value="00025" />
+      <option name="presentableId" value="LOCAL‎-00025" />
+      <option name="project" value="LOCAL‎" />
+      <updated>1757931833446</updated>
+    </task>
+    <option name="localTasksCounter" value="26" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -274,6 +280,7 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="update README" />
     <MESSAGE value="updated PQC/NonPQC support" />
-    <option name="LAST_COMMIT_MESSAGE" value="updated PQC/NonPQC support" />
+    <MESSAGE value="merging processor and setup to one file + readme" />
+    <option name="LAST_COMMIT_MESSAGE" value="merging processor and setup to one file + readme" />
   </component>
 </project>
