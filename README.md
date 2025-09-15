@@ -60,11 +60,16 @@ This will install the Python environment, dependencies, ChromeDriver, and Geckod
 ---
 
 ### 4. Running the Project
-Once setup is complete, start the server using:
+
+You now use `run.sh` with the environment variable `MODE`.
 
 ```bash
-./run.sh
+MODE=KYBER ./run.sh      # To run in Kyber mode
+MODE=MLKEM ./run.sh      # To run in ML-KEM mode
+./run.sh                 # Defaults to Non-PQC mode if MODE not set
 ```
+
+---
 
 The Flask server will be available at:
 ```
