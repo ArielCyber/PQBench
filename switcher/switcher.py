@@ -1,10 +1,18 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, json
 import requests
 import logging
 
 import os, socket
 from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Semaphore
+from collections import defaultdict
+
+# one-at-a-time per backend key
+_backend_slots = defaultdict(lambda: Semaphore(1))
+# modest concurrency across different backends
+_EXECUTOR = ThreadPoolExecutor(max_workers=10)
 
 # Sniffer config (env-driven)
 SNIFFER_URL = os.getenv("SNIFFER_URL", "http://172.18.0.1:8080")
@@ -26,14 +34,14 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 
 Containers = {
     # compose service names can be used as hosts
-    "linux_kyber":  os.getenv("URL_LINUX_KYBER",  "http://linux-kyber:5000"),
-    "linux_mlkem":  os.getenv("URL_LINUX_MLKEM",  "http://linux-mlkem:5000"),
+    "linux_kyber": os.getenv("URL_LINUX_KYBER", "http://linux-kyber:5000"),
+    "linux_mlkem": os.getenv("URL_LINUX_MLKEM", "http://linux-mlkem:5000"),
 
     "windows_kyber": os.getenv("URL_WINDOWS_KYBER", "http://windows-kyber:5000"),
     "windows_mlkem": os.getenv("URL_WINDOWS_MLKEM", "http://windows-mlkem:5000"),
 
-    "macos_kyber":  os.getenv("URL_MACOS_KYBER",  "http://macos-kyber:5000"),
-    "macos_mlkem":  os.getenv("URL_MACOS_MLKEM",  "http://macos-mlkem:5000"),
+    "macos_kyber": os.getenv("URL_MACOS_KYBER", "http://macos-kyber:5000"),
+    "macos_mlkem": os.getenv("URL_MACOS_MLKEM", "http://macos-mlkem:5000"),
 }
 
 TARGET_ENDPOINT = "/execute"
@@ -85,115 +93,227 @@ def choose_container(opsys: str, algo: str) -> str:
     return key
 
 
+    """
+    This function expects to get a JSON with a "jobs" field which contains
+    all the recording information for each container (os, browser, algo, seesions etc.)
+    A single json without jobs field is considered as a single recording
+    """
+
+
 @app.route("/config", methods=["POST"])
 def config_handler():
-    """
-    Gets recording characteristics information from the webUI or the agent by a POST request.
-    :return: a JSON with the recording information to the right container to navigate to.
-    """
+
     payload = request.get_json(silent=True) or {}
 
-    # --- helpers to normalize inputs ---
+    # read incoming json (single or a batch)
+    raw_jobs = payload.get("jobs")
+    if raw_jobs is None:
+        raw_jobs = [payload]  # single job backward-compat
+
+    # helper functions
+    def pick(d, *keys):  # returns the first present key
+        for k in keys:
+            if k in d and d[k] is not None:
+                return d[k]
+        return None
+
+    # normalization functions
     def norm_os(v):
         if v is None:
             return None
         s = str(v).strip().lower()
-        return OS_MAP.get(s, s)  # convert code "0"->"linux", or keep "linux" as is
+        return OS_MAP.get(s, s)
 
     def norm_algo(v):
         if v is None:
             return None
         s = str(v).strip().lower()
-        return ALGO_MAP.get(s, s)  # convert code "1"->"kyber", or keep "kyber" as is
+        return ALGO_MAP.get(s, s)
 
     def norm_browser(v):
         if v is None:
             return None
         return str(v).strip().lower()
 
-    # --- accept both "operationSystem" and "os" ---
-    os_raw = payload.get("operationSystem", payload.get("os"))
-    browser = norm_browser(payload.get("browser"))
-    algo_raw = payload.get("algorithm")
-    sessions_raw = payload.get("sessions")
+    # parse each job
+    jobs = []
+    errors = []
+    for idx, j in enumerate(raw_jobs):
+        os_raw = pick(j, "operationSystem", "os")
+        browser = norm_browser(pick(j, "browser"))
+        algo_name = norm_algo(pick(j, "algorithm", "algo"))
+        sessions_raw = pick(j, "sessions", "session", "count")
+        logging.debug(f"Sessions raw: {sessions_raw}")
 
-    try:
-        opsys = norm_os(os_raw)
-        algo = norm_algo(algo_raw)
-        sessions = int(sessions_raw) if sessions_raw is not None else 0
-        logging.debug(f"Values from JSON POST request: {opsys}, {browser}, {algo}, {sessions}")
-
-    except (ValueError, TypeError) as e:
-        return jsonify({"error": f"Bad request: {e}"}), 400
-
-    # --- validate inputs ---
-    if opsys not in {"linux", "windows", "macos"}:
-        return jsonify({"error": "Invalid operating system"}), 400
-    elif browser not in {"chrome", "firefox"}:
-        return jsonify({"error": "Invalid web browser"}), 400
-    elif algo not in {"kyber", "mlkem", "non-pqc"}:
-        return jsonify({"error": "Invalid algorithm"}), 400
-    elif sessions <= 0:
-        return jsonify({"error": "Invalid number of captures"}), 400
-
-    logging.debug("Values are valid, proceed to choose container")
-    try:
-        target_key = choose_container(opsys, algo)
-        logging.debug(f"Key to the container: {target_key}")
-        target_base = Containers[target_key].rstrip("/")
-        url = f"{target_base}{TARGET_ENDPOINT}"  # e.g. container_name/run
-
-        # resolve backend container IP (for sniffer target)
-        logging.debug("Get container IP")
-        backend_ip = _resolve_service_ip(target_base)
-        logging.debug(f"Container IP {backend_ip}")
-        # start sniffer capture for this target
-        sniff_status, sniff_body = _start_sniffer_for_target(
-            container_ip=backend_ip,
-            opsys=opsys,
-            sessions=sessions,
-            browser=browser,
-            algo_name=algo,
-            duration_sec=30,        # or map from your payload if you add it
-            iface=None,               # will fall back to env SNIFFER_IFACE
-            domain=None,              # env default
-        )
-
-        # forward info to the chosen container
-        info = {
-            "os": opsys,
-            "browser": browser,
-            "algorithm": algo_raw,
-            "sessions": sessions
-        }
-
-        logging.debug(f"Request sent to: {url}")
-        resp = requests.post(url, json=info, timeout=60)
-
-        # 4) Relay a combined response
         try:
-            backend_json = resp.json()
+            opsys = norm_os(os_raw)
+            if isinstance(sessions_raw, str):
+                sessions_raw = sessions_raw.strip()
+            if sessions_raw is None or (isinstance(sessions_raw, str) and not sessions_raw.isdigit()):
+                raise ValueError("sessions must be an integer > 0")
+            sessions = int(sessions_raw)
+        except Exception as e:
+            errors.append({"index": idx, "error": f"Bad job: {e}"})
+            continue
+
+        # validate
+        if opsys not in {"linux", "windows", "macos"}:
+            errors.append({"index": idx, "error": "Invalid operating system"});
+            continue
+        if browser not in {"chrome", "firefox"}:
+            errors.append({"index": idx, "error": "Invalid web browser"});
+            continue
+        if algo_name not in {"kyber", "mlkem", "non-pqc"}:
+            errors.append({"index": idx, "error": "Invalid algorithm"});
+            continue
+        if sessions <= 0:
+            errors.append({"index": idx, "error": "Invalid sessions"});
+            continue
+
+        try:
+            key = choose_container(opsys, algo_name)
+        except Exception as e:
+            errors.append({"index": idx, "error": str(e)})
+            continue
+
+        algo_code = ALGO_NAME_TO_CODE.get(algo_name.lower())
+        target_base = Containers[key].rstrip("/")
+        jobs.append({
+            "idx": idx,
+            "opsys": opsys,
+            "browser": browser,
+            "algo_name": algo_name,   # string
+            "algo_code": algo_code,   # int
+            "sessions": sessions,
+            "target_key": key,
+            "target_base": target_base
+        })
+
+    if not jobs:
+        return jsonify({"error": "No valid jobs", "detail": errors}), 400
+
+    # ----- resolve backend IPs and build sniffer targets (dedup) -----
+    sniffer_targets = []
+    seen = set()
+    for jb in jobs:
+        ip = _resolve_service_ip(jb["target_base"])
+        # build code e.g. "121" using your existing name_dir mapping
+        algo_code = ALGO_NAME_TO_CODE[jb["algo_name"]]
+        code = generate_code(jb["opsys"], jb["browser"], algo_code)
+        key = (ip, code)
+        if key in seen:  # avoid double-sniffing exact same (container,code)
+            continue
+        seen.add(key)
+        tgt = {
+            "os": jb["opsys"],
+            "browser": jb["browser"],
+            "algo": algo_code,
+            "container_ip": ip,
+            "duration_sec": SNIFFER_DURATION_SEC_DEFAULT,
+            "iface": SNIFFER_IFACE,  # or omit to let sniffer default
+            "filter_mode": SNIFFER_FILTER_MODE,
+            "domain": SNIFFER_DOMAIN if SNIFFER_FILTER_MODE == "domain" else None,
+            "ports": SNIFFER_PORTS
+        }
+        # strip Nones
+        for k in list(tgt.keys()):
+            if tgt[k] is None:
+                del tgt[k]
+        sniffer_targets.append(tgt)
+
+    # ----- arm sniffer batch first -----
+    sniffer_payload = {"targets": sniffer_targets} if sniffer_targets else {"targets": []}
+    try:
+        sresp = requests.post(f"{SNIFFER_URL}/start", json=sniffer_payload, timeout=30)
+        try:
+            sniffer_body = sresp.json()
         except ValueError:
-            backend_json = {"text": resp.text}
-
-        return jsonify({
-            "routed_to": target_key,
-            "backend": {
-                "status": resp.status_code,
-                "response": backend_json
-            },
-            "sniffer": {
-                "url": f"{SNIFFER_URL}/start",
-                "status": sniff_status,
-                "response": sniff_body
-            }
-        }), resp.status_code
-
+            sniffer_body = {"text": sresp.text}
     except requests.RequestException as e:
-        return jsonify({"error": f"Switcher couldn't reach backend: {e}"}), 502
-    except Exception as e:
-        app.logger.exception(e)
-        return jsonify({"error": "Unexpected server error"}), 500
+        # sniffer failed; we can still try backends, but report the failure
+        sresp = type("obj", (), {"status_code": 502})
+        sniffer_body = {"error": f"sniffer unreachable: {e}"}
+
+    # ----- fan-out backend executions with per-backend serialization -----
+    results = [None] * len(raw_jobs)
+
+    def run_one(jb):
+        sem = _backend_slots[jb["target_key"]]
+        with sem:
+            info = {
+                "os": jb["opsys"],
+                "browser": jb["browser"],
+                "algorithm": jb["algo_code"],
+                "sessions": jb["sessions"]
+            }
+            url = f'{jb["target_base"]}{TARGET_ENDPOINT}'
+            try:
+                r = requests.post(url, json=info, timeout=60)
+                try:
+                    body = r.json()
+                except ValueError:
+                    body = {"text": r.text}
+                return {"status": r.status_code, "response": body, "routed_to": jb["target_key"]}
+            except requests.RequestException as e:
+                return {"status": 502, "response": {"error": f"backend unreachable: {e}"},
+                        "routed_to": jb["target_key"]}
+
+    futures = {_EXECUTOR.submit(run_one, jb): jb for jb in jobs}
+    for fut in as_completed(futures):
+        jb = futures[fut]
+        res = fut.result()
+        results[jb["idx"]] = res
+
+    # include any per-job parse errors, aligned by index
+    for err in errors:
+        i = err["index"]
+        results_len = max(len(results), i + 1)
+        if len(results) < results_len:
+            results.extend([None] * (results_len - len(results)))
+        results[i] = {"status": 400, "response": err, "routed_to": None}
+
+    payload_out = {
+        "sniffer": {"url": f"{SNIFFER_URL}/start", "status": getattr(sresp, "status_code", 0),
+                    "response": sniffer_body},
+        "backends": results
+    }
+    # force pretty JSON output
+    pretty_json = json.dumps(payload_out, indent=2, ensure_ascii=False)
+    return Response(pretty_json, status=207, mimetype="application/json") # Multi-Status: mixed per-job outcomes
+
+
+def generate_code(os_name: str, browser: str, algo: int) -> str:
+    """
+    Encode OS, browser, and algorithm into a 3-digit session code.
+
+    Mapping:
+        OS: linux=1, windows=2, macos=3
+        Browser: firefox=1, chrome=2
+        Algo: Non-PQC=0, Kyber=1, MLKEM=2
+
+    Args:
+        os_name: OS label.
+        browser: Browser label.
+        algo: Algorithm code.
+
+    Returns:
+        A three-character string like ``"121"``.
+
+    Raises:
+        ValueError: If an unsupported OS or browser label is provided.
+    """
+    os_map = {"linux": "1", "windows": "2", "macos": "3"}
+    browser_map = {"firefox": "1", "chrome": "2"}
+    try:
+        os_num = os_map[os_name.lower()]
+        browser_num = browser_map[browser.lower()]
+    except KeyError as e:
+        logging.error(f"name_dir invalid input: {e}")
+        raise ValueError(f"Invalid input: {e.args[0]}")
+
+    code = f"{os_num}{browser_num}{algo}"
+    logging.debug(f"name_dir -> os={os_name} browser={browser} algo={algo} => {code}")
+    return code
 
 
 def _resolve_service_ip(service_url: str) -> str:
@@ -208,16 +328,16 @@ def _resolve_service_ip(service_url: str) -> str:
 
 
 def _start_sniffer_for_target(
-    container_ip: str,
-    opsys: str,
-    browser: str,
-    algo_name: str,
-    sessions: int,
-    duration_sec: int | None = None,
-    iface: str | None = None,
-    filter_mode: str | None = None,
-    domain: str | None = None,
-    ports: str | None = None,
+        container_ip: str,
+        opsys: str,
+        browser: str,
+        algo_name: str,
+        sessions: int,
+        duration_sec: int | None = None,
+        iface: str | None = None,
+        filter_mode: str | None = None,
+        domain: str | None = None,
+        ports: str | None = None,
 ):
     """
     Build a single-target StartBatchRequest and POST it to the sniffer.
@@ -226,20 +346,22 @@ def _start_sniffer_for_target(
     if algo_code is None:
         raise ValueError(f"Unsupported algorithm for sniffer: {algo_name}")
 
+    logging.debug(f"algo name: {algo_name}")
+    logging.debug(f"algo code: {algo_code}")
     payload = {
         "targets": [
             {
-                "os": opsys,                         # "linux" | "windows" | "macos"
-                "browser": browser,                  # "chrome" | "firefox"
-                "algo": algo_code,                   # 0/1/2
-                "container_ip": container_ip,        # e.g., "172.19.0.5"
+                "os": opsys,  # "linux" | "windows" | "macos"
+                "browser": browser,  # "chrome" | "firefox"
+                "algo": algo_code,  # 0/1/2
+                "container_ip": container_ip,  # e.g., "172.19.0.5"
                 "duration_sec": duration_sec or SNIFFER_DURATION_SEC_DEFAULT,
                 "session_count": sessions,
                 # per-target options
                 "filter_mode": "domain",
                 "iface": iface,
                 "domain": domain if (filter_mode or SNIFFER_FILTER_MODE) == "domain" else None,
-                #"ports": ports or SNIFFER_PORTS,
+                # "ports": ports or SNIFFER_PORTS,
                 # "custom_bpf": "...",               # only if you use filter_mode="custom"
             }
         ]
@@ -274,7 +396,8 @@ def done_handler():
 
     # --- Forward to sniffer /done ---
     try:
-        key = choose_container(os_name, "kyber" if algo in ("kyber", 1) else ("mlkem" if algo in ("mlkem", 2) else "non-pqc"))
+        key = choose_container(os_name,
+                               "kyber" if algo in ("kyber", 1) else ("mlkem" if algo in ("mlkem", 2) else "non-pqc"))
         base_url = Containers[key].rstrip("/")
         backend_ip = _resolve_service_ip(base_url)
 
@@ -302,8 +425,6 @@ def done_handler():
         "received": data,
         "sniffer": sniffer_reply
     })
-
-
 
 
 if __name__ == "__main__":
