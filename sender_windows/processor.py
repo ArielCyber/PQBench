@@ -376,8 +376,8 @@ def config_handler():
         return jsonify('Error: session count must be a positive number')
 
     try:
-        result = process_session(browser, algo, amount, domain)
-        return jsonify(result), 200
+        response = process_session(browser, algo, amount, domain)
+        return jsonify(response), 200
     except BrowserLaunchError as e:
         # This is Browser startup error
         result = jsonify({'Error': str(e)}), 500

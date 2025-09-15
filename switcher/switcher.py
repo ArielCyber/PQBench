@@ -260,49 +260,39 @@ def _start_sniffer_for_target(
         return resp.status_code, {"text": resp.text}
 
 
-@app.route('/done', methods=['POST'])
-def done_handler():
-    data = request.get_json(force=True)  # {"os": "linux", "browser": "chrome", "algo": 1}
-    logging.info(f"Received done payload: {data}")
+def notify_sniffer_done(os_name: str, browser: str, algo: str | int, backend_ip: str, base_url: str | None = None):
+    """
+    Tell the sniffer that capture for a specific backend is finished.
+    Returns: (status_code, json_or_text_dict)
+    """
+    # Accept both strings ("kyber") and ints (1) for algo
+    algo_norm = str(algo).lower()
+    algo_name = (
+        "kyber" if algo_norm in {"1", "kyber"} else
+        "mlkem" if algo_norm in {"2", "mlkem"} else
+        "non-pqc"
+    )
 
-    # Extract fields
-    os_name = data.get("os")
-    browser = data.get("browser")
-    algo = data.get("algo")
+    payload = {
+        "os": os_name,
+        "browser": browser,
+        "algo": algo_name,
+        "container_ip": backend_ip
+    }
 
-    logging.debug(f"os={os_name}, browser={browser}, algo={algo}")
+    logging.debug(f"json payload {payload}, notifying sniffer done")
+    if base_url:
+        payload["url"] = base_url
 
-    # --- Forward to sniffer /done ---
     try:
-        key = choose_container(os_name,
-                               "kyber" if algo in ("kyber", 1) else ("mlkem" if algo in ("mlkem", 2) else "non-pqc"))
-        base_url = Containers[key].rstrip("/")
-        backend_ip = _resolve_service_ip(base_url)
-
-        payload = {
-            # send both; sniffer prefers container_ip, can fall back to url
-            "container_ip": backend_ip,
-            "url": base_url
-        }
-
-        sniffer_resp = requests.post(
-            f"{SNIFFER_URL}/done",
-            json=payload,
-            timeout=10
-        )
-        sniffer_resp.raise_for_status()
-        sniffer_reply = sniffer_resp.json()
-        logging.info(f"Forwarded to sniffer, reply: {sniffer_reply}")
-    except Exception as e:
-        logging.error(f"Failed to forward to sniffer /done: {e}")
-        return jsonify({"status": "error", "reason": str(e)}), 502
-
-    # Return a response JSON
-    return jsonify({
-        "status": "ok",
-        "received": data,
-        "sniffer": sniffer_reply
-    })
+        done_resp = requests.post(f"{SNIFFER_URL}/done", json=payload, timeout=15)
+        try:
+            body = done_resp.json()
+        except ValueError:
+            body = {"text": done_resp.text}
+        return done_resp.status_code, body
+    except requests.RequestException as e:
+        return 502, {"error": f"Failed to reach sniffer /done: {e}"}
 
 
 if __name__ == "__main__":

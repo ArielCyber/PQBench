@@ -220,8 +220,8 @@ def config_handler():
         return jsonify('Error: session count must be a positive number')
 
     try:
-        result = process_session(browser, algo, amount, domain)
-        return jsonify(result), 200
+        response = process_session(browser, algo, amount, domain)
+        return jsonify(response), 200
     except BrowserLaunchError as e:
         # This is Browser startup error
         result = jsonify({'Error': str(e)}), 500
@@ -232,30 +232,6 @@ def config_handler():
         app.logger.exception(e)
         logging.error(f"{e}")
         return jsonify({'Error': 'Unexpected server error'}), 500
-
-
-@app.route('/done', methods=['POST'])
-def done(browser: str, algo: int):
-    logging.info("PQBench session done")
-    switcher_url = os.getenv("SWITCHER_URL", "http://switcher:8080")
-    logging.debug(f"Switcher URL: {switcher_url}")
-
-    payload = {
-        "os": "linux",
-        "browser": browser,
-        "algo": algo
-    }
-
-    for attempt in range(10):
-        try:
-            r = requests.post(f"{switcher_url}/done", json=payload, timeout=5)
-            r.raise_for_status()
-            logging.info("Notified switcher done: %s", r.json())
-            return r.json()
-        except Exception as e:
-            logging.warning("Sniffer not ready yet (attempt %d): %s", attempt + 1, e)
-            time.sleep(1)
-    raise RuntimeError("Failed to reach sniffer API after retries")
 
 
 class BrowserLaunchError(RuntimeError):
