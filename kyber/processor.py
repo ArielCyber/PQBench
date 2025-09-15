@@ -129,17 +129,26 @@ def open_chrome(algo):
 
     prefs = {"browser": {"enabled_labs_experiments": []}}
 
-    if algo in [0, 1]:
+    if algo == 0:
         prefs["browser"]["enabled_labs_experiments"] = [
-            "enable-tls13-kyber@2",  # explicitly disabled
-            "use-ml-kem@2"  # explicitly disabled
+            "enable-tls13-kyber@2",  # מכובה
+            "use-ml-kem@2"  # מכובה
         ]
         chrome_path = "/Applications/Google Chrome 128.app/Contents/MacOS/Google Chrome for Testing"
         chromedriver_path = "/usr/local/bin/chromedriver-128.0.6613.137"
+
+    elif algo == 1:
+        prefs["browser"]["enabled_labs_experiments"] = [
+            "enable-tls13-kyber@1",  # ✅ Kyber מופעל
+            "use-ml-kem@2"  # מכובה
+        ]
+        chrome_path = "/Applications/Google Chrome 128.app/Contents/MacOS/Google Chrome for Testing"
+        chromedriver_path = "/usr/local/bin/chromedriver-128.0.6613.137"
+
     elif algo == 2:
         prefs["browser"]["enabled_labs_experiments"] = [
-            "enable-tls13-kyber@2",  # explicitly disabled
-            "use-ml-kem@1"  # enabled
+            "enable-tls13-kyber@2",  # מכובה
+            "use-ml-kem@1"  # ✅ ML-KEM מופעל
         ]
         chrome_path = "/Applications/Google Chrome 138.app/Contents/MacOS/Google Chrome for Testing"
         chromedriver_path = "/usr/local/bin/chromedriver-138.0.7204.183"
