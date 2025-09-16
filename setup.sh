@@ -134,12 +134,13 @@ echo "Disabling sudo password prompts..."
 echo "$USER ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/nopasswd
 
 echo "Removing user password..."
-sudo dscl . -passwd /Users/$USER ""
+read -sp "Enter your current user password to remove it: " OLDPASS
+echo
+sudo dscl . -passwd /Users/$USER "$OLDPASS" ""
 
 echo "Disabling lock screen password..."
 defaults write com.apple.screensaver askForPassword -int 0
 defaults write com.apple.screensaver askForPasswordDelay -int 0
 
 echo "Setup complete for mode: $MODE"
-
 
