@@ -131,16 +131,18 @@ fi
 
 # --- Disable Password & Lock for Automation ---
 echo "Disabling sudo password prompts..."
-echo "$USER ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/nopasswd
+REAL_USER=$(logname)
+echo "$REAL_USER ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/nopasswd
 
 echo "Removing user password..."
-read -sp "Enter your current user password to remove it: " OLDPASS
+read -sp "Enter current password for $REAL_USER: " OLDPASS
 echo
-sudo dscl . -passwd /Users/$USER "$OLDPASS" ""
+sudo dscl . -passwd /Users/$REAL_USER "$OLDPASS" ""
 
 echo "Disabling lock screen password..."
-defaults write com.apple.screensaver askForPassword -int 0
-defaults write com.apple.screensaver askForPasswordDelay -int 0
+sudo -u "$REAL_USER" defaults write com.apple.screensaver askForPassword -int 0
+sudo -u "$REAL_USER" defaults write com.apple.screensaver askForPasswordDelay -int 0
 
 echo "Setup complete for mode: $MODE"
+
 
