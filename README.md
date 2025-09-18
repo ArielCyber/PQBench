@@ -16,14 +16,8 @@ You must create **two separate containers**, one for `Kyber + Non-PQC`, and one 
 ### ➤ Create the Kyber Container
 
 ```bash
-docker run -it \
-    --device /dev/kvm \
-    -p 50922:10022 \
-    -v /tmp/.X11-unix:/tmp/.X11-unix \
-    -e "DISPLAY=${DISPLAY:-:0.0}" \
-    -e SHORTNAME=big-sur \
-    --name pqc-kyber \
-    sickcodes/docker-osx:latest
+docker-compose build
+docker-compose run kyber
 ```
 
 Inside the container:
@@ -49,15 +43,8 @@ This container supports both `Kyber (1)` and `Non-PQC (0)` algorithms.
 ### ➤ Create the MLKEM Container
 
 ```bash
-docker run -it \
-    --device /dev/kvm \
-    -p 50922:10022 \
-    -v /tmp/.X11-unix:/tmp/.X11-unix \
-    -e "DISPLAY=${DISPLAY:-:0.0}" \
-    -e SHORTNAME=big-sur \
-    --name pqc-mlkem \
-    sickcodes/docker-osx:latest
-
+docker-compose build
+docker-compose run kyber
 ```
 
 Inside the container:
