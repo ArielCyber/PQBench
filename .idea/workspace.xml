@@ -312,7 +312,31 @@
       <option name="project" value="LOCAL‎" />
       <updated>1758048836722</updated>
     </task>
-    <option name="localTasksCounter" value="30" />
+    <task id="LOCAL‎-00030" summary="merging processor and setup to one file + readme">
+      <option name="closed" value="true" />
+      <created>1758049230537</created>
+      <option name="number" value="00030" />
+      <option name="presentableId" value="LOCAL‎-00030" />
+      <option name="project" value="LOCAL‎" />
+      <updated>1758049230537</updated>
+    </task>
+    <task id="LOCAL‎-00031" summary="merging processor and setup to one file + readme">
+      <option name="closed" value="true" />
+      <created>1758049334336</created>
+      <option name="number" value="00031" />
+      <option name="presentableId" value="LOCAL‎-00031" />
+      <option name="project" value="LOCAL‎" />
+      <updated>1758049334336</updated>
+    </task>
+    <task id="LOCAL‎-00032" summary="merging processor and setup to one file + readme">
+      <option name="closed" value="true" />
+      <created>1758049617573</created>
+      <option name="number" value="00032" />
+      <option name="presentableId" value="LOCAL‎-00032" />
+      <option name="project" value="LOCAL‎" />
+      <updated>1758049617573</updated>
+    </task>
+    <option name="localTasksCounter" value="33" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

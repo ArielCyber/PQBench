@@ -129,24 +129,4 @@ if [[ -n "$FIREFOX_VERSION" ]]; then
   fi
 fi
 
-# --- Disable Password & Lock for Automation ---
-echo "Disabling sudo password prompts..."
-echo "$USER ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/nopasswd
-
-echo "Removing user password..."
-sudo dscl . -passwd /Users/$USER ""
-
-echo "Enabling auto login..."
-sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser "$USER"
-
-echo "Disabling screen lock password..."
-REAL_USER=$(logname)
-sudo -u "$REAL_USER" defaults write com.apple.screensaver askForPassword -int 0
-sudo -u "$REAL_USER" defaults write com.apple.screensaver askForPasswordDelay -int 0
-
-echo "Disabling FileVault (if enabled)..."
-sudo fdesetup disable
-
-echo "Setup complete for mode: $MODE"
-
 
