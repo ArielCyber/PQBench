@@ -1,0 +1,70 @@
+version: "3.8"
+
+# Common env for both macOS guests
+x-env-osx: &env_osx
+  # No X11 on Windows; we’ll use VNC instead. DISPLAY kept for completeness.
+  DISPLAY: ""
+  OS_NAME: osx
+  MODE: ""  # overridden per service
+  PQBENCH_SETUP_SH: ${PQBENCH_SETUP_SH:-/opt/pqbench/setup.sh}
+  PQBENCH_RUN_SH:   ${PQBENCH_RUN_SH:-/opt/pqbench/run.sh}
+  # Force pure software emulation on Windows (no /dev/kvm)
+  # docker-osx already uses "kvm:tcg"; this hint avoids confusion in logs.
+  QEMU_ACCEL: tcg
+
+x-docker-osx-common: &docker_osx_common
+  image: sickcodes/docker-osx:latest
+  privileged: true
+  # Windows has no /dev, /lib/modules, or X11 socket ⇒ do NOT bind them.
+  # We only mount our helper scripts and give each VM its own state volume.
+  volumes:
+    - ./setup.sh:/opt/pqbench/setup.sh:ro
+    - ./run.sh:/opt/pqbench/run.sh:ro
+  restart: unless-stopped
+  stop_grace_period: 2m
+  networks: [appnet]
+
+services:
+  osx-kyber:
+    <<: *docker_osx_common
+    container_name: osx-kyber
+    environment:
+      <<: *env_osx
+      MODE: KYBER
+    # Each VM **must** have its own /home volume to avoid races
+    volumes:
+      - osx_kyber_home:/home
+      - ./setup.sh:/opt/pqbench/setup.sh:ro
+      - ./run.sh:/opt/pqbench/run.sh:ro
+    # Expose unique host ports for SSH & VNC (QEMU usernet already forwards)
+    ports:
+      - "10022:10022"  # SSH into macOS guest (container forwards to QEMU)
+      - "5901:5900"    # VNC viewer on Windows host → container → QEMU
+
+  osx-mlkem:
+    <<: *docker_osx_common
+    container_name: osx-mlkem
+    environment:
+      <<: *env_osx
+      MODE: MLKEM
+    volumes:
+      - osx_mlkem_home:/home
+      - ./setup.sh:/opt/pqbench/setup.sh:ro
+      - ./run.sh:/opt/pqbench/run.sh:ro
+    ports:
+      - "10023:10022"
+      - "5902:5900"
+
+networks:
+  appnet:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: pqbench0
+    ipam:
+      config:
+        - subnet: 172.18.0.0/24
+          gateway: 172.18.0.1
+
+volumes:
+  osx_kyber_home:
+  osx_mlkem_home:
