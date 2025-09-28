@@ -1,70 +1,60 @@
 version: "3.8"
 
-# Common env for both macOS guests
-x-env-osx: &env_osx
-  # No X11 on Windows; we’ll use VNC instead. DISPLAY kept for completeness.
-  DISPLAY: ""
-  OS_NAME: osx
-  MODE: ""  # overridden per service
-  PQBENCH_SETUP_SH: ${PQBENCH_SETUP_SH:-/opt/pqbench/setup.sh}
-  PQBENCH_RUN_SH:   ${PQBENCH_RUN_SH:-/opt/pqbench/run.sh}
-  # Force pure software emulation on Windows (no /dev/kvm)
-  # docker-osx already uses "kvm:tcg"; this hint avoids confusion in logs.
-  QEMU_ACCEL: tcg
+x-env-macos: &env_macos
+  HEADLESS: "1"           # use the built-in web viewer (no GTK)
+  QEMU_AUDIO_DRV: "none"  # don't try ALSA
+  VERSION: "14"
+  # Resources (defaults are 2 cores / 4G if you omit these)
+  RAM_SIZE: "6G"
+  CPU_CORES: "2"
+  DISK_SIZE: "64G"
 
-x-docker-osx-common: &docker_osx_common
-  image: sickcodes/docker-osx:latest
+x-macos-common: &macos_common
+  image: dockurr/macos
   privileged: true
-  # Windows has no /dev, /lib/modules, or X11 socket ⇒ do NOT bind them.
-  # We only mount our helper scripts and give each VM its own state volume.
-  volumes:
-    - ./setup.sh:/opt/pqbench/setup.sh:ro
-    - ./run.sh:/opt/pqbench/run.sh:ro
+  devices:
+    - /dev/kvm
+    - /dev/net/tun
+  cap_add:
+    - NET_ADMIN
+  # Headless + silence audio backend to avoid ALSA issues on non-Linux hosts
   restart: unless-stopped
   stop_grace_period: 2m
-  networks: [appnet]
 
 services:
-  osx-kyber:
-    <<: *docker_osx_common
-    container_name: osx-kyber
+  macos-kyber:
+    <<: *macos_common
+    container_name: macos-kyber
     environment:
-      <<: *env_osx
-      MODE: KYBER
-    # Each VM **must** have its own /home volume to avoid races
+      <<: *env_macos
+      MODE: "KYBER"       # <-- your app logic can key off this
+    # Persist VM state separately for this VM
     volumes:
-      - osx_kyber_home:/home
-      - ./setup.sh:/opt/pqbench/setup.sh:ro
-      - ./run.sh:/opt/pqbench/run.sh:ro
-    # Expose unique host ports for SSH & VNC (QEMU usernet already forwards)
+      - ./macos-kyber:/storage   # persistent VM files (disks, NVRAM, etc.)
+      - ./shared:/shared         # <--- PQBench scripts
     ports:
-      - "10022:10022"  # SSH into macOS guest (container forwards to QEMU)
-      - "5901:5900"    # VNC viewer on Windows host → container → QEMU
+      - "8008:8006"              # web viewer (http://localhost:8008)
+      - "5901:5900/tcp"          # VNC (optional)
+      - "5901:5900/udp"
+      - "5005:5000"
+    networks: [pqbench-macos]
 
-  osx-mlkem:
-    <<: *docker_osx_common
-    container_name: osx-mlkem
+  macos-mlkem:
+    <<: *macos_common
+    container_name: macos-mlkem
     environment:
-      <<: *env_osx
-      MODE: MLKEM
+      <<: *env_macos
+      MODE: "MLKEM"
     volumes:
-      - osx_mlkem_home:/home
-      - ./setup.sh:/opt/pqbench/setup.sh:ro
-      - ./run.sh:/opt/pqbench/run.sh:ro
+      - ./macos-mlkem:/storage
+      - ./shared:/shared
     ports:
-      - "10023:10022"
-      - "5902:5900"
+      - "8009:8006"
+      - "5902:5900/tcp"
+      - "5902:5900/udp"
+      - "5006:5000"
+    networks: [pqbench-macos]
 
 networks:
-  appnet:
+  pqbench-macos:
     driver: bridge
-    driver_opts:
-      com.docker.network.bridge.name: pqbench0
-    ipam:
-      config:
-        - subnet: 172.18.0.0/24
-          gateway: 172.18.0.1
-
-volumes:
-  osx_kyber_home:
-  osx_mlkem_home:
