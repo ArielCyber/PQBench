@@ -4,10 +4,10 @@ services:
     image: switcher:latest
     container_name: switcher_container
     command: >
-      gunicorn -w 2 -k gthread --threads 4 -t 0 -b 0.0.0.0:5000
+      gunicorn -w 2 -k gthread --threads 4 -t 0 -b 0.0.0.0:5000 
       --access-logfile - --error-logfile -
       switcher:app
-
+    # -t 0 = no gunicorn timeout kill
     ports: [ "5000:5000" ]
     environment:
       SNIFFER_URL: "http://172.18.0.1:8080"
@@ -34,6 +34,11 @@ services:
     networks: [appnet]
 
   linux-kyber:
+    shm_size: "1g"        # << big shared memory helps Chrome a lot
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     build:
       context: ./sender_linux
       dockerfile: Dockerfile_Linux_Kyber

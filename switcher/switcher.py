@@ -211,9 +211,9 @@ def config_handler():
           3) poll sniffer /status until the session_ids from this run are done
           4) sniffer /done (with all session_ids)
         """
-        poll_interval = float(os.getenv("SNIFFER_POLL_INTERVAL_SEC", "1"))  # seconds
-        per_session   = float(os.getenv("SNIFFER_WAIT_PER_SESSION", "45"))  # seconds per session
-        max_wait      = per_session * max(1, jb["sessions"])
+        poll_interval = float(os.getenv("SNIFFER_POLL_INTERVAL_SEC", "5"))  # seconds
+        per_session = float(os.getenv("SNIFFER_WAIT_PER_SESSION", "30"))  # seconds per session
+        max_wait = per_session * max(1, jb["sessions"])
 
         logging.info("job[%d] routed_to=%s | wait plan: sessions=%d, per_session=%ss -> max_wait=%ss",
                      jb["idx"], jb["target_key"], jb["sessions"], per_session, max_wait)
@@ -230,7 +230,7 @@ def config_handler():
                 "browser": jb["browser"],
                 "algo": jb["algo_code"],
                 "container_ip": backend_ip,
-                "duration_sec": SNIFFER_DURATION_SEC_DEFAULT,
+                "duration_sec": min(max_wait, 3600),
                 "iface": SNIFFER_IFACE,
                 "filter_mode": SNIFFER_FILTER_MODE,
                 "domain": SNIFFER_DOMAIN if SNIFFER_FILTER_MODE == "domain" else None,
@@ -272,7 +272,7 @@ def config_handler():
                 sn_start = {"status": 502, "response": {"error": f"sniffer /start unreachable: {e}"}}
 
             # tiny arm wait
-            time.sleep(2)
+            time.sleep(0.5)
 
             # 2) backend /execute
             exec_url = f'{jb["target_base"]}{TARGET_ENDPOINT}'
@@ -285,7 +285,7 @@ def config_handler():
             backend_exec = {"status": None, "response": None}
             try:
                 logging.info("job[%d] backend /execute -> %s | payload=%s", jb["idx"], exec_url, exec_payload)
-                r = requests.post(exec_url, json=exec_payload, timeout=max_wait)  # 0 = no gunicorn timeout kill
+                r = requests.post(exec_url, json=exec_payload, timeout=None) # wait max_wait time for results
                 backend_exec["status"] = r.status_code
                 try:
                     backend_exec["response"] = r.json()
@@ -397,264 +397,6 @@ def config_handler():
     pretty = json.dumps(body, indent=2, ensure_ascii=False)
     logging.info("config_handler: returning 207 with multi-status body")
     return Response(pretty, status=207, mimetype="application/json")
-
-
-# def config_handler():
-#     payload = request.get_json(silent=True) or {}
-#
-#     # ---------- accept single or batch ----------
-#     raw_jobs = payload.get("jobs")
-#     if raw_jobs is None:
-#         raw_jobs = [payload]  # backward compat
-#
-#     # ---------- helpers ----------
-#     def pick(d, *keys):
-#         for k in keys:
-#             if k in d and d[k] is not None:
-#                 return d[k]
-#         return None
-#
-#     def norm_os(v):
-#         if v is None: return None
-#         s = str(v).strip().lower()
-#         return OS_MAP.get(s, s)
-#
-#     def norm_algo(v):
-#         if v is None: return None
-#         s = str(v).strip().lower()
-#         if s in {"nopqc", "no-pqc"}:
-#             s = "non-pqc"
-#         return ALGO_MAP.get(s, s)
-#
-#     def norm_browser(v):
-#         if v is None: return None
-#         return str(v).strip().lower()
-#
-#     # ---------- parse & validate ----------
-#     jobs, errors = [], []
-#     for idx, j in enumerate(raw_jobs):
-#         os_raw       = pick(j, "operationSystem", "os")
-#         browser      = norm_browser(pick(j, "browser"))
-#         algo_name    = norm_algo(pick(j, "algorithm", "algo"))
-#         sessions_raw = pick(j, "sessions", "session", "count")
-#
-#         try:
-#             opsys = norm_os(os_raw)
-#             if isinstance(sessions_raw, str):
-#                 sessions_raw = sessions_raw.strip()
-#             if sessions_raw is None or (isinstance(sessions_raw, str) and not sessions_raw.isdigit()):
-#                 raise ValueError("sessions must be an integer > 0")
-#             sessions = int(sessions_raw)
-#         except Exception as e:
-#             errors.append({"index": idx, "error": f"Bad job: {e}"})
-#             continue
-#
-#         if opsys not in {"linux", "windows", "macos"}:
-#             errors.append({"index": idx, "error": "Invalid operating system"}); continue
-#         if browser not in {"chrome", "firefox"}:
-#             errors.append({"index": idx, "error": "Invalid web browser"}); continue
-#         if algo_name not in {"kyber", "mlkem", "non-pqc"}:
-#             errors.append({"index": idx, "error": "Invalid algorithm"}); continue
-#         if sessions <= 0:
-#             errors.append({"index": idx, "error": "Invalid sessions"}); continue
-#
-#         try:
-#             target_key  = choose_container(opsys, algo_name)
-#             target_base = Containers[target_key].rstrip("/")
-#             algo_code   = ALGO_NAME_TO_CODE[algo_name.lower()]  # int 0/1/2
-#         except Exception as e:
-#             errors.append({"index": idx, "error": str(e)})
-#             continue
-#
-#         jobs.append({
-#             "idx": idx,
-#             "opsys": opsys,
-#             "browser": browser,
-#             "algo_name": algo_name,   # string
-#             "algo_code": algo_code,   # int
-#             "sessions": sessions,     # sniffer will manage N sessions internally
-#             "target_key": target_key,
-#             "target_base": target_base
-#         })
-#
-#     if not jobs:
-#         out = {"error": "No valid jobs", "detail": errors}
-#         return Response(json.dumps(out, indent=2, ensure_ascii=False),
-#                         status=400, mimetype="application/json")
-#
-#     # ---------- per-job: single /start → /execute → poll /status → /done (sniffer only) ----------
-#     def run_one(jb):
-#         """
-#         Per-job:
-#           1) sniffer /start  (session_count = jb['sessions'])
-#           2) backend /execute
-#           3) poll /status up to max_wait (dynamic); when sniffer shows 'done' or we hit timeout:
-#                → sniffer /done (idempotent)
-#         """
-#         poll_interval = float(os.getenv("SNIFFER_POLL_INTERVAL_SEC", "2"))  # seconds
-#
-#         # Dynamic wait: default 30s per session; optional cap via env
-#         per_session = float(os.getenv("SNIFFER_WAIT_PER_SESSION", "30"))
-#         max_wait = per_session * max(1, jb["sessions"])
-#
-#         logging.info(f"Sniffer wait plan: sessions={jb['sessions']}, per_session={per_session}s → max_wait={max_wait}s")
-#
-#         sem = _backend_slots[jb["target_key"]]
-#         with sem:
-#             backend_ip = _resolve_service_ip(jb["target_base"])
-#
-#             # 1) sniffer /start (single run; sniffer manages session_count)
-#             start_target = {
-#                 "os": jb["opsys"],
-#                 "browser": jb["browser"],
-#                 "algo": jb["algo_code"],
-#                 "container_ip": backend_ip,
-#                 "duration_sec": SNIFFER_DURATION_SEC_DEFAULT,
-#                 "iface": SNIFFER_IFACE,
-#                 "filter_mode": SNIFFER_FILTER_MODE,
-#                 "domain": SNIFFER_DOMAIN if SNIFFER_FILTER_MODE == "domain" else None,
-#                 "ports": SNIFFER_PORTS,
-#                 "session_count": jb["sessions"],
-#             }
-#             for k in list(start_target.keys()):
-#                 if start_target[k] is None:
-#                     del start_target[k]
-#
-#             sn_start = {"status": None, "response": None}
-#             child_ids = []
-#             try:
-#                 s = requests.post(f"{SNIFFER_URL}/start", json={"targets": [start_target]}, timeout=450) # 15
-#                 sn_start["status"] = s.status_code
-#                 try:
-#                     logging.info("Started sniffing")
-#                     sb = s.json()
-#                 except ValueError:
-#                     logging.error("Sniffer did not start")
-#                     sb = {"text": s.text}
-#                 sn_start["response"] = sb
-#                 if isinstance(sb, dict) and sb.get("children"):
-#                     for ch in sb["children"]:
-#                         sid = ch.get("session_id")
-#                         if sid:
-#                             child_ids.append(sid)
-#             except requests.RequestException as e:
-#                 sn_start = {"status": 502, "response": {"error": f"sniffer /start unreachable: {e}"}}
-#
-#             logging.info("Arming sniffer")
-#             # tiny arm wait
-#             try:
-#                 time.sleep(0.2)
-#             except:
-#                 pass
-#
-#             # 2) backend /execute
-#             exec_url = f'{jb["target_base"]}{TARGET_ENDPOINT}'
-#             exec_payload = {
-#                 "os": jb["opsys"],
-#                 "browser": jb["browser"],
-#                 "algorithm": jb["algo_code"],  # INT 0/1/2
-#                 "sessions": jb["sessions"],
-#             }
-#             backend_exec = {"status": None, "response": None}
-#             try:
-#                 logging.info(f"Sender container {jb['target_key']} executing")
-#                 r = requests.post(exec_url, json=exec_payload, timeout=400)
-#                 backend_exec["status"] = r.status_code
-#                 try:
-#                     backend_exec["response"] = r.json()
-#                 except ValueError:
-#                     logging.error("Sender container error in execution")
-#                     backend_exec["response"] = {"text": r.text}
-#             except requests.RequestException as e:
-#                 logging.critical("Sender container unreachable")
-#                 backend_exec = {"status": 502, "response": {"error": f"backend unreachable: {e}"}}
-#
-#             # 3) POLL sniffer /status until "done" or timeout
-#             def all_done(body, ip, ids):
-#                 sessions = body.get("sessions", [])
-#                 if ids:
-#                     want = set(ids)
-#                     done = {s.get("session_id") for s in sessions if s.get("done")}
-#                     return want.issubset(done)
-#                 # fallback: no active (not-done) sessions for this IP
-#                 return not any(s.get("container_ip") == ip and not s.get("done") for s in sessions)
-#
-#             sn_status_samples = []
-#             start_ts = time.time()
-#             done = False
-#             while time.time() - start_ts < max_wait:
-#                 try:
-#                     logging.info("Checking sniffer's status")
-#                     st = requests.get(f"{SNIFFER_URL}/status", timeout=100) # 5
-#                     body = st.json() if st.ok else {"error": f"status {st.status_code}"}
-#                 except Exception as e:
-#                     logging.critical("Sniffer status unreachable")
-#                     body = {"error": f"status unreachable: {e}"}
-#                 if len(sn_status_samples) < 5:
-#                     sn_status_samples.append(body)
-#                 logging.info("Checking status of each session")
-#                 if isinstance(body, dict) and all_done(body, backend_ip, child_ids):
-#                     logging.info("Sniffer finished sniffing")
-#                     done = True
-#                     break
-#                 time.sleep(poll_interval)
-#
-#             # 4) /done (sniffer only) when done OR at timeout (force finalize)
-#             sn_done = {"status": None, "response": None}
-#             try:
-#                 logging.info("/done of sniffer")
-#                 d = requests.post(f"{SNIFFER_URL}/done",
-#                                   json={"container_ip": backend_ip,
-#                                         **({"session_id": child_ids[0]} if child_ids else {})},
-#                                   timeout=200) # 20
-#                 try:
-#                     logging.info("Trying sniffer /done")
-#                     d_body = d.json()
-#                 except ValueError:
-#                     d_body = {"text": d.text}
-#                     logging.error("Sniffer encountered an error")
-#                 sn_done = {"status": d.status_code, "response": d_body}
-#             except requests.RequestException as e:
-#                 logging.critical("Sniffer /done unreachable")
-#                 sn_done = {"status": 502, "response": {"error": f"sniffer /done unreachable: {e}"}}
-#
-#             return {
-#                 "routed_to": jb["target_key"],
-#                 "backend": {"execute": backend_exec},
-#                 "sniffer": {
-#                     "start": sn_start,
-#                     "wait": {
-#                         "polled": True,
-#                         "interval_sec": poll_interval,
-#                         "max_wait_sec": max_wait,  # now scales with sessions
-#                         "elapsed_sec": round(time.time() - start_ts, 2),
-#                         "finished": done,
-#                         "samples": sn_status_samples,  # keep a few for debugging
-#                     },
-#                     "done": sn_done,
-#                 }
-#             }
-#
-#     # ---------- fan-out (serialized per-backend, parallel across backends) ----------
-#     results = [None] * len(raw_jobs)
-#     futures = { _EXECUTOR.submit(run_one, jb): jb for jb in jobs }
-#     for fut in as_completed(futures):
-#         jb = futures[fut]
-#         results[jb["idx"]] = fut.result()
-#
-#     # include parse/validation errors at their indices
-#     for err in errors:
-#         i = err["index"]
-#         if i >= len(results):
-#             results.extend([None] * (i - len(results) + 1))
-#         results[i] = {"status": 400, "response": err, "routed_to": None}
-#
-#     body = {
-#         "backends": results,
-#         "note": "One sniffer /start per job (session_count=N). Polls /status up to (per_session * N) seconds; then /done."
-#     }
-#     return Response(json.dumps(body, indent=2, ensure_ascii=False),
-#                     status=207, mimetype="application/json")  # Multi-Status: mixed per-job outcomes
 
 
 def generate_code(os_name: str, browser: str, algo: int) -> str:
