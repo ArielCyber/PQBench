@@ -1,8 +1,10 @@
 import logging
 import os
+import platform
 import sys
+import time
 from pathlib import Path
-from time import sleep
+
 from flask import Flask, request, jsonify
 from selenium import webdriver
 from selenium.common import WebDriverException
@@ -10,122 +12,264 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.firefox import GeckoDriverManager
-from webdriver_manager.chrome import ChromeDriverManager
 
 app = Flask(__name__)
 
-# === Logging setup ===
-log_path = os.getenv("PY_LOG_FILE", "processor.log")
-Path(log_path).parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
+    handlers=[logging.StreamHandler(sys.stdout)])
 
-# === Route: Serve correct HTML based on MODE ===
+
+@app.get("/health")
+def health():
+    return "ok", 200
+
+
 @app.route('/')
 def root():
-    mode = os.getenv("MODE", "KYBER").upper()
-    if mode == "MLKEM":
+    """
+    Serve the main static HTML page.
+
+    Returns
+    -------
+    Response
+        The contents of 'mlkem_page.html' from the static folder.
+    """
+    algo_mode = os.getenv("MODE")
+    logging.debug(f"ALGO MODE is {algo_mode}")
+    if algo_mode == "KYBER":
+        logging.debug("Returning kyber html")
+        return app.send_static_file('kyber_page.html')
+    elif algo_mode == "MLKEM":
+        logging.debug("Returning mlkem html")
         return app.send_static_file('mlkem_page.html')
-    return app.send_static_file('kyber_page.html')
+    return None
 
-# === Browser decision logic ===
+
 def open_browser(browser: str, algo: int):
-    try:
-        return open_chrome(algo) if browser.lower() == 'chrome' else open_firefox(algo)
-    except WebDriverException as e:
-        raise BrowserLaunchError(str(e)) from e
+    """
+    The decision-making for which browser should be opened
 
-# === Firefox ===
+    Parameters
+    ----------
+    browser : str
+        'chrome' or 'firefox'.
+    algo : int
+        0 for non PQC
+        1 for Kyber
+        2 for MLKEM
+
+    Returns
+    -------
+    WebDriver
+        An instance of Chrome or Firefox WebDriver.
+
+    Raises
+    ------
+    BrowserLaunchError
+        If the driver fails to start or browser is not installed.
+    """
+
+    try:
+        if browser.lower() == 'chrome':
+            return open_chrome(algo)
+        else:
+            return open_firefox(algo)
+    except WebDriverException as e:
+        raise e
+
+
 def open_firefox(algo: int):
+    firefox_bin = "/Applications/Firefox.app/Contents/MacOS/firefox"
+
+    # Fix the root/HOME mismatch that Firefox rejects
+    try:
+        is_root = (os.geteuid() == 0)
+    except AttributeError:
+        is_root = False  # non-UNIX
+    if is_root:
+        root_home = "/var/root"
+        # Make sure it exists and is owned by root
+        os.makedirs(root_home, exist_ok=True)
+        os.environ["HOME"] = root_home
+        logging.debug(f"Root home directory is {root_home}")
+
+    if not (Path(firefox_bin).is_file() and os.access(firefox_bin, os.X_OK)):
+        raise BrowserLaunchError(f"Firefox binary not found or not executable at: {firefox_bin}")
+
     firefox_opts = webdriver.FirefoxOptions()
+    firefox_opts.binary_location = firefox_bin
     firefox_opts.add_argument("-headless")
 
     if algo == 0:
-        firefox_opts.set_preference('network.http.http3.enable_kyber', False)
-        firefox_opts.set_preference('security.tls.enable_kyber', False)
+        firefox_opts.set_preference("network.http.http3.enable_kyber", False)
+        firefox_opts.set_preference("security.tls.enable_kyber", False)
+        logging.debug("Firefox: PQC disabled")
     else:
-        firefox_opts.set_preference('security.tls.enable_kyber', True)
-        firefox_opts.set_preference('network.http.http3.enabled', True)
-        firefox_opts.set_preference('network.http.http3.enable_kyber', True)
+        firefox_opts.set_preference("security.tls.enable_kyber", True)
+        firefox_opts.set_preference("network.http.http3.enabled", True)
+        firefox_opts.set_preference("network.http.http3.enable_kyber", True)
+        logging.debug("Firefox: PQC enabled")
 
-    binary_path = "/Applications/Firefox 130.app/Contents/MacOS/firefox" if algo in [0, 1] \
-                  else "/Applications/Firefox 142.app/Contents/MacOS/firefox"
-    firefox_opts.binary_location = binary_path
+    try:
+        gecko_path = GeckoDriverManager().install()
+        logging.debug(f"Geckodriver installed at: {gecko_path}")
+    except Exception as e:
+        logging.warning(f"webdriver-manager install failed ({e}); using Selenium Manager.", exc_info=True)
+        gecko_path = None
 
-    gecko_path = GeckoDriverManager().install()
-    return webdriver.Firefox(service=FirefoxService(gecko_path), options=firefox_opts)
+    try:
+        if gecko_path:
+            service = FirefoxService(executable_path=gecko_path)
+            driver = webdriver.Firefox(service=service, options=firefox_opts)
+        else:
+            # Let Selenium Manager pick the right driver/arch automatically
+            service = FirefoxService()
+            driver = webdriver.Firefox(service=service, options=firefox_opts)
 
-# === Chrome ===
-def open_chrome(algo: int):
+        return driver
+
+    except Exception as e:
+        logging.critical("Firefox launch failed: %s", e, exc_info=True)
+        raise BrowserLaunchError(
+            "Failed to open Firefox (root/HOME mismatch fixed; check arch or app install)."
+        ) from e
+
+
+def open_chrome(algo):
+
+    # MacOS expected Chrome binary location
+    chrome_bin = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome for Testing"
+
     chrome_opts = webdriver.ChromeOptions()
-    chrome_opts.add_argument("--no-sandbox")
+    chrome_opts.binary_location = chrome_bin
+
+    # Headless Chrome
+    chrome_opts.add_argument("--no-sandbox")  # containers often need this
     chrome_opts.add_argument("--headless=new")
-    chrome_opts.add_argument("--disable-gpu")
+    chrome_opts.add_argument("--disable-gpu")  # Windows workaround
     chrome_opts.add_argument("--disable-dev-shm-usage")
-    chrome_opts.add_argument("--remote-debugging-port=0")
+    chrome_opts.add_argument("--remote-debugging-port=0")  # avoids DevTools port collision
 
     prefs = {"browser": {"enabled_labs_experiments": []}}
-    mode = os.getenv("MODE", "KYBER").upper()
 
+    # ----- Chrome PQC experiments (via Local State "enabled_labs_experiments") -----
     if algo == 0:
-        prefs["browser"]["enabled_labs_experiments"] = ["enable-tls13-kyber@2", "use-ml-kem@2"]
-        chrome_path = "/Applications/Google Chrome 128.app/Contents/MacOS/Google Chrome for Testing"
-        chromedriver_path = "/usr/local/bin/chromedriver-128.0.6613.137"
+        prefs["browser"]["enabled_labs_experiments"] = [
+            "enable-tls13-kyber@2",
+            "use-ml-kem@2"]
 
     elif algo == 1:
-        prefs["browser"]["enabled_labs_experiments"] = ["enable-tls13-kyber@1", "use-ml-kem@2"]
-        chrome_path = "/Applications/Google Chrome 128.app/Contents/MacOS/Google Chrome for Testing"
-        chromedriver_path = "/usr/local/bin/chromedriver-128.0.6613.137"
-
-    elif algo == 2:
-        prefs["browser"]["enabled_labs_experiments"] = ["enable-tls13-kyber@2", "use-ml-kem@1"]
-        chrome_path = "/Applications/Google Chrome 138.app/Contents/MacOS/Google Chrome for Testing"
-        chromedriver_path = "/usr/local/bin/chromedriver-138.0.7204.183"
-    else:
-        raise ValueError(f"Unknown algorithm value: {algo}")
+        prefs["browser"]["enabled_labs_experiments"] = [
+            "use-ml-kem@2"]
+    elif algo == 2:  # ML-KEM
+        prefs["browser"]["enabled_labs_experiments"] = [
+            "enable-tls13-kyber@2",  # Disabled
+            "use-ml-kem@1",  # Enabled
+        ]
 
     chrome_opts.add_experimental_option("localState", prefs)
-    chrome_opts.binary_location = chrome_path
 
-    return webdriver.Chrome(options=chrome_opts, service=ChromeService(chromedriver_path))
+    try:
+        service = ChromeService()
+        return webdriver.Chrome(options=chrome_opts, service=service)
+    except WebDriverException as e:
+        logging.critical(e)
+        raise BrowserLaunchError("Failed to open Chrome: is Chrome installed and the driver up to date?") from e
 
-# === Main browser session logic ===
+
 def process_session(browser: str, algo: int, amount: int, domain: str):
-    for _ in range(amount):
+    """
+    Launch the browser to visit the domain.
+
+    Parameters
+    ----------
+    browser : str
+        'chrome' or 'firefox'.
+    algo : int
+        0 for non PQC
+        1 for Kyber
+        2 for MLKEM
+    amount : int
+        Number of sessions
+    domain : str
+        Target domain to visit.
+
+    Returns
+    -------
+    dict
+        JSON-serializable result with 'status'.
+    """
+
+    for i in range(amount):
         driver = open_browser(browser, algo)
+        logging.debug(f"The driver opened: {driver}")
         driver.get(f'https://{domain}')
-        WebDriverWait(driver, 10).until(lambda d: d.execute_script("return document.readyState") == "complete")
-        sleep(5)
-        driver.quit()
+        logging.debug(f"The driver opened the given domain")
+
+        try:
+            # Wait until document is fully ready (or a small dwell)
+            logging.debug(f"Waiting for the web driver")
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete")
+            time.sleep(3)
+        finally:
+            driver.quit()
+
     return {"status": "done"}
 
-# === POST /config ===
-@app.route('/config', methods=['POST'])
+
+@app.route('/execute', methods=['POST'])
 def config_handler():
+    """
+    Flask endpoint to initiate a PQClass session based on client config.
+
+    Parses JSON payload, validates inputs, runs `process_session`, and returns JSON result.
+
+    Returns
+    -------
+    Response
+        JSON response with either `status` and `directory` on success,
+        or `error` message with appropriate HTTP status code.
+    """
     logging.info("Starting PQBench session...")
     data = request.get_json() or request.form
     try:
         browser = data['browser']
+        logging.debug(f"Browser: {browser}")
         algo = int(data['algorithm'])
+        logging.debug(f"Algo: {algo}")
         amount = int(data['sessions'])
+        logging.debug(f"Amount: {amount}")
         domain = data.get('domain', 'pq.cloudflareresearch.com')
-        if amount <= 0:
-            raise ValueError("Session count must be > 0")
-        return jsonify(process_session(browser, algo, amount, domain)), 200
     except (KeyError, ValueError) as e:
-        return jsonify({'Error': str(e)}), 400
+        logging.error(f"Bad request: {e}")
+        return jsonify({'Error': f'Bad request: {e}'}), 400
+
+    if amount <= 0:
+        logging.error("Sessions count must be greater than 0.")
+        return jsonify('Error: session count must be a positive number')
+
+    try:
+        response = process_session(browser, algo, amount, domain)
+        return jsonify(response), 200
     except BrowserLaunchError as e:
-        return jsonify({'Error': str(e)}), 500
+        # This is Browser startup error
+        result = jsonify({'Error': str(e)}), 500
+        logging.error(f"{e}")
+        return result
     except Exception as e:
-        logging.exception("Unexpected error")
+        # Catch anything else we didn’t anticipate
+        app.logger.exception(e)
+        logging.error(f"{e}")
         return jsonify({'Error': 'Unexpected server error'}), 500
 
-# === Exception Class ===
+
 class BrowserLaunchError(RuntimeError):
+    """Raised when we fail to launch the requested browser."""
     pass
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

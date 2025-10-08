@@ -1,10 +1,4 @@
-#!/bin/bash
-
-# Ensure bash even if someone invokes with sh
-[ -n "$BASH_VERSION" ] || { echo "Please run with bash:  bash setup_macos.sh"; exit 1; }
-set -euo pipefail
-
-# =========================
+#!/usr/bin/env bash
 # PQBench macOS bootstrapper
 # - Ensures Python3 + pip
 # - Creates venv & installs deps
@@ -12,158 +6,67 @@ set -euo pipefail
 # - Disables sleep (pmset) and adds a caffeinate LaunchAgent fallback
 # - Ensures 'sudo mount_9p shared' persists across reboots (LaunchDaemon)
 # - Installs browsers (Chrome/Firefox) + drivers based on MODE
-# =========================
+# - Skips re-download if a browser is already installed
 
-MODE="${MODE:-nonpq}"                       # run_kyber / run_mlkem set this; keep default if you ever run manually
+set -euo pipefail
+
+# -------------------------
+# Globals & paths
+# -------------------------
+MODE="${MODE:-nonpq}"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ID="com.pqbench.processor"
-CAFFEINATE_ID="com.pqbench.caffeinate"
-MOUNT9P_ID="com.pqbench.mount9p"
+VENV_DIR="${REPO_DIR}/.venv"
+REQ="${REPO_DIR}/requirements.txt"
+RUNNER="${REPO_DIR}/run_processor.sh"
+LOG_DIR="${HOME}/Library/Logs"
 LA_DIR="${HOME}/Library/LaunchAgents"
 LD_DIR="/Library/LaunchDaemons"
-LOG_DIR="${HOME}/Library/Logs"
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="${REPO_DIR}/.venv"
-RUNNER="${REPO_DIR}/run_processor.sh"
-PY="${VENV_DIR}/bin/python"
-PROC="${REPO_DIR}/processor.py"
+CAFFEINATE_ID="com.pqbench.caffeinate"
+MOUNT9P_ID="com.pqbench.mount9p"
+BIN_DIR="/usr/local/bin"   # will fallback to /opt/homebrew/bin on Apple Silicon if needed
 
-mkdir -p "${LA_DIR}" "${LOG_DIR}"
-
-echo "==> PQBench setup (macOS) | MODE=${MODE}"
-echo "==> Repo: ${REPO_DIR}"
-
-need_cmd() { command -v "$1" >/dev/null 2>&1; }
-
-ensure_homebrew() {
-  if ! need_cmd brew; then
-    echo "==> Homebrew not found. Installing..."
-    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    if [[ -d "/opt/homebrew/bin" ]]; then
-      eval "$(/opt/homebrew/bin/brew shellenv)"
-    elif [[ -d "/usr/local/bin" ]]; then
-      export PATH="/usr/local/bin:${PATH}"
-    fi
-  else
-    echo "==> Homebrew found."
-  fi
-}
-
-ensure_tool() {
-  # Install a tool via brew if missing
-  local t="$1"
-  if ! need_cmd "$t"; then
-    ensure_homebrew
-    echo "==> Installing ${t} via Homebrew..."
-    brew install "$t"
-  fi
-}
-
-ensure_python() {
-  if need_cmd python3; then
-    echo "==> python3 present: $(python3 -V)"
-  else
-    echo "==> python3 not found. Installing via Homebrew..."
-    ensure_homebrew
-    brew update
-    brew install python
-  fi
-  echo "==> pip3: $(pip3 --version || true)"
-}
-
-# ---------- 9P SHARED (persistent) ----------
-mount9p_now() {
-  local MOUNT_BIN
-  MOUNT_BIN="$(command -v mount_9p || echo /sbin/mount_9p)"
-  echo "==> Ensuring 'shared' 9P mount is present (running: sudo ${MOUNT_BIN} shared)"
-  if sudo "${MOUNT_BIN}" shared 2>/dev/null; then
-    echo "==> 9P 'shared' mounted (or already mounted)."
-  else
-    echo "!! Could not mount 9P 'shared' right now. Will still install LaunchDaemon to do this on boot."
-  fi
-}
-
-install_mount9p_daemon() {
-  local PLIST="${LD_DIR}/${MOUNT9P_ID}.plist"
-  local MOUNT_BIN
-  MOUNT_BIN="$(command -v mount_9p || echo /sbin/mount_9p)"
-
-  echo "==> Installing 9P LaunchDaemon: ${PLIST}"
-  sudo /usr/bin/tee "${PLIST}" >/dev/null <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
- "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>${MOUNT9P_ID}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${MOUNT_BIN}</string>
-    <string>shared</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><false/>
-  <key>StandardOutPath</key><string>/var/log/pqbench-mount9p.out.log</string>
-  <key>StandardErrorPath</key><string>/var/log/pqbench-mount9p.err.log</string>
-</dict>
-</plist>
-EOF
-  sudo chown root:wheel "${PLIST}"
-  sudo chmod 644 "${PLIST}"
-
-  if launchctl print system | grep -q "${MOUNT9P_ID}" 2>/dev/null; then
-    sudo launchctl bootout system "/${PLIST#*/}" 2>/dev/null || true
-  fi
-  if sudo launchctl bootstrap system "/${PLIST#*/}" 2>/dev/null; then
-    sudo launchctl enable "system/${MOUNT9P_ID}" || true
-    echo "==> 9P LaunchDaemon bootstrapped."
-  else
-    sudo launchctl unload "${PLIST}" >/dev/null 2>&1 || true
-    sudo launchctl load -w "${PLIST}"
-    echo "==> 9P LaunchDaemon loaded (legacy)."
-  fi
-}
-# -------------------------------------------
-
-# ---------- Python venv ----------
-setup_venv() {
-  echo "==> Creating virtualenv at ${VENV_DIR}"
-  python3 -m venv "${VENV_DIR}"
-  "${VENV_DIR}/bin/pip" install --upgrade pip wheel setuptools
-  if [[ -f "${REPO_DIR}/requirements.txt" ]]; then
-    echo "==> Installing requirements.txt"
-    "${VENV_DIR}/bin/pip" install -r "${REPO_DIR}/requirements.txt"
-  else
-    echo "==> No requirements.txt found; skipping."
-  fi
-}
-
-# ---------- Browser install (Chrome/Firefox + drivers) ----------
-# Arch detection
-ARCH="$(uname -m)"
-if [[ "$ARCH" == "arm64" ]]; then
-  CHROME_ARCH="mac-arm64"
-  FIREFOX_ARCH="macos-aarch64"
-else
-  CHROME_ARCH="mac-x64"
-  FIREFOX_ARCH="macos"
+# Ensure sudo early for daemon installs & /Applications modifications
+if [[ "$EUID" -ne 0 ]]; then
+  # Re-exec with sudo preserving env MODE to keep version selection deterministic
+  export MODE
 fi
 
-# Versions & URLs by MODE (from your snippet)
+# Detect arch for URLs (Chrome/driver & Firefox/geckodriver)
+_mac_arch() {
+  if [[ "$(uname -m)" == "arm64" ]]; then
+    echo "arm64"
+  else
+    echo "x64"
+  fi
+}
+
+# Prefer a writable bin dir
+_pick_bin_dir() {
+  if [[ -d "/opt/homebrew/bin" ]]; then
+    echo "/opt/homebrew/bin"
+  else
+    echo "/usr/local/bin"
+  fi
+}
+BIN_DIR="$(_pick_bin_dir)"
+
+# -------------------------
+# Versions by MODE
+# -------------------------
 choose_browser_versions() {
   case "${MODE}" in
-    kyber)
+    KYBER)
       CHROME_VERSION="128.0.6613.137"
       FIREFOX_VERSION="130.0.1"
-      FIREFOX_APP_NAME="Firefox 130.app"
-      CHROME_APP_NAME="Google Chrome 128.app"
-      FIREFOX_URL="https://download.mozilla.org/?product=firefox-130.0.1-ssl&os=osx&lang=en-US"
+      FIREFOX_APP_NAME="Firefox.app"
+      CHROME_APP_NAME="Google Chrome.app"
       ;;
-    mlkem)
-      CHROME_VERSION="138.0.7204.183"
+    MLKEM)
+      CHROME_VERSION="139.0.7258.155"
       FIREFOX_VERSION="142.0.1"
-      FIREFOX_APP_NAME="Firefox 142.app"
-      CHROME_APP_NAME="Google Chrome 138.app"
-      FIREFOX_URL="https://download.mozilla.org/?product=firefox-142.0.1-ssl&os=osx&lang=en-US"
+      FIREFOX_APP_NAME="Firefox.app"
+      CHROME_APP_NAME="Google Chrome.app"
       ;;
     *)
       CHROME_VERSION=""
@@ -172,127 +75,62 @@ choose_browser_versions() {
   esac
 }
 
-install_chrome_and_driver() {
-  [[ -z "${CHROME_VERSION}" ]] && { echo "==> MODE=${MODE}: skipping Chrome setup."; return 0; }
+# -------------------------
+# Utilities
+# -------------------------
+_info() { echo -e "\033[1;34m==>\033[0m $*"; }
+_warn() { echo -e "\033[1;33m[!]\033[0m $*"; }
+_err()  { echo -e "\033[1;31m[✗]\033[0m $*" >&2; }
 
-  ensure_tool unzip   # required for zip extraction
-  local CHROME_PATH="/Applications/${CHROME_APP_NAME}"
-
-  if [[ ! -d "${CHROME_PATH}" ]]; then
-    echo "==> Installing Chrome ${CHROME_VERSION}..."
-    local URL="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/${CHROME_ARCH}/chrome-${CHROME_ARCH}.zip"
-    rm -rf chrome_temp chrome.zip
-    curl -L -o chrome.zip "${URL}"
-    unzip -q chrome.zip -d chrome_temp
-
-    local CHROME_APP_PATH
-    CHROME_APP_PATH="$(find chrome_temp -type d -name 'Google Chrome for Testing.app' | head -n 1 || true)"
-    if [[ -z "${CHROME_APP_PATH:-}" ]]; then
-      echo "!! Error: Google Chrome for Testing.app not found in archive"
-      rm -rf chrome.zip chrome_temp
-      exit 1
-    fi
-
-    mv "${CHROME_APP_PATH}" "${CHROME_APP_NAME}"
-    sudo mv "${CHROME_APP_NAME}" "${CHROME_PATH}"
-    rm -rf chrome.zip chrome_temp
-  else
-    echo "==> Chrome ${CHROME_VERSION} already installed at ${CHROME_PATH}."
-  fi
-
-  # ChromeDriver
-  local DRIVER_PATH="/usr/local/bin/chromedriver-${CHROME_VERSION}"
-  local SYMLINK_PATH="/usr/local/bin/chromedriver"
-  if [[ ! -f "${DRIVER_PATH}" ]]; then
-    echo "==> Installing ChromeDriver ${CHROME_VERSION}..."
-    local ZIP_NAME="chromedriver-${CHROME_ARCH}.zip"
-    local DL_URL="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/${CHROME_ARCH}/chromedriver-${CHROME_ARCH}.zip"
-    rm -rf "${ZIP_NAME}" chromedriver_temp
-    curl -L -o "${ZIP_NAME}" "${DL_URL}"
-    unzip -q "${ZIP_NAME}" -d chromedriver_temp
-    local CHROMEDRIVER_BINARY
-    CHROMEDRIVER_BINARY="$(find chromedriver_temp -type f -name chromedriver | head -n 1 || true)"
-    if [[ -z "${CHROMEDRIVER_BINARY:-}" ]]; then
-      echo "!! Error: chromedriver binary not found!"
-      rm -rf "${ZIP_NAME}" chromedriver_temp
-      exit 1
-    fi
-    sudo mv "${CHROMEDRIVER_BINARY}" "${DRIVER_PATH}"
-    sudo chmod +x "${DRIVER_PATH}"
-    rm -rf "${ZIP_NAME}" chromedriver_temp
-  else
-    echo "==> ChromeDriver ${CHROME_VERSION} already installed."
-  fi
-
-  # Maintain a stable symlink
-  if [[ ! -L "${SYMLINK_PATH}" || "$(readlink "${SYMLINK_PATH}")" != "${DRIVER_PATH}" ]]; then
-    echo "==> Linking ${SYMLINK_PATH} -> ${DRIVER_PATH}"
-    sudo ln -sf "${DRIVER_PATH}" "${SYMLINK_PATH}"
-  else
-    echo "==> ChromeDriver symlink already correct."
+require_root_for_daemons() {
+  if [[ "$EUID" -ne 0 ]]; then
+    _info "Requesting sudo for system daemons (mount_9p & installs)..."
+    sudo -v
   fi
 }
 
-install_firefox_and_geckodriver() {
-  [[ -z "${FIREFOX_VERSION}" ]] && { echo "==> MODE=${MODE}: skipping Firefox setup."; return 0; }
+mdread_version() {
+  # Read CFBundleShortVersionString from an app bundle if possible
+  local app_path="$1"
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+    "${app_path}/Contents/Info.plist" 2>/dev/null || true
+}
 
-  local FIREFOX_PATH="/Applications/${FIREFOX_APP_NAME}"
-  if [[ ! -d "${FIREFOX_PATH}" ]]; then
-    echo "==> Downloading Firefox ${FIREFOX_VERSION}..."
-    rm -f firefox.dmg
-    curl -L -o firefox.dmg "${FIREFOX_URL}"
+ensure_dirs() {
+  mkdir -p "${LOG_DIR}" "${LA_DIR}"
+}
 
-    echo "==> Mounting Firefox DMG..."
-    # Capture mountpoint to detach reliably
-    MOUNT_OUT="$(hdiutil attach firefox.dmg -nobrowse)"
-    VOL_PATH="$(echo "${MOUNT_OUT}" | awk -F'\t' '/\/Volumes\//{print $NF; exit}')"
-    if [[ -z "${VOL_PATH:-}" || ! -d "${VOL_PATH}" ]]; then
-      echo "!! Could not determine Firefox volume mountpoint."
-      hdiutil detach "/Volumes/Firefox" >/dev/null 2>&1 || true
-      rm -f firefox.dmg
-      exit 1
-    fi
-
-    echo "==> Copying Firefox to /Applications..."
-    cp -R "${VOL_PATH}/Firefox.app" "${FIREFOX_PATH}" 2>/dev/null || sudo cp -R "${VOL_PATH}/Firefox.app" "${FIREFOX_PATH}"
-
-    echo "==> Unmounting Firefox..."
-    hdiutil detach "${VOL_PATH}" || true
-    rm -f firefox.dmg
-  else
-    echo "==> Firefox ${FIREFOX_VERSION} already installed."
+# -------------------------
+# Python & venv
+# -------------------------
+ensure_python() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    _err "python3 not found. Install Xcode CLT or Python via Homebrew, then re-run."
+    exit 1
   fi
+  _info "Python3 found: $(python3 --version)"
+}
 
-  # Geckodriver
-  local GECKODRIVER_VERSION="v0.34.0"
-  local GECKO_TARGET="/usr/local/bin/geckodriver"
-  local WANT_VERSION_STR="${GECKODRIVER_VERSION}"
-  if ! command -v geckodriver >/dev/null 2>&1 || [[ "$("${GECKO_TARGET}" --version 2>/dev/null || echo "")" != *"${WANT_VERSION_STR}"* ]]; then
-    echo "==> Installing geckodriver ${GECKODRIVER_VERSION}..."
-    local TGZ="geckodriver-${GECKODRIVER_VERSION}-${FIREFOX_ARCH}.tar.gz"
-    rm -f geckodriver.tar.gz geckodriver "${TGZ}"
-    curl -L -o geckodriver.tar.gz "https://github.com/mozilla/geckodriver/releases/download/${GECKODRIVER_VERSION}/geckodriver-${GECKODRIVER_VERSION}-${FIREFOX_ARCH}.tar.gz"
-    tar -xzf geckodriver.tar.gz
-    sudo mv geckodriver "${GECKO_TARGET}"
-    sudo chmod +x "${GECKO_TARGET}"
-    rm -f geckodriver.tar.gz
+create_venv_install_deps() {
+  if [[ ! -d "${VENV_DIR}" ]]; then
+    _info "Creating venv at ${VENV_DIR}"
+    python3 -m venv "${VENV_DIR}"
+  fi
+  # shellcheck disable=SC1091
+  source "${VENV_DIR}/bin/activate"
+  python -m pip install --upgrade pip
+  if [[ -f "${REQ}" ]]; then
+    _info "Installing Python deps from ${REQ}"
+    # macOS venvs often don't need --break-system-packages; omit to be safe.
+    python -m pip install -r "${REQ}"
   else
-    echo "==> geckodriver ${GECKODRIVER_VERSION} already installed."
+    _warn "No requirements.txt found; skipping pip install."
   fi
 }
 
-install_browsers() {
-  choose_browser_versions
-  if [[ -z "${CHROME_VERSION}" && -z "${FIREFOX_VERSION}" ]]; then
-    echo "==> MODE=${MODE} (nonpq) — skipping browser installs."
-    return 0
-  fi
-  install_chrome_and_driver
-  install_firefox_and_geckodriver
-}
-# --------------------------------------------
-
-# ---------- Runner & LaunchAgent ----------
+# -------------------------
+# Runner & LaunchAgent
+# -------------------------
 make_runner() {
   cat > "${RUNNER}" <<'EOF'
 #!/usr/bin/env bash
@@ -311,19 +149,26 @@ mkdir -p "${LOG_DIR}"
   echo "Repo: ${REPO_DIR}"
   echo "Python: ${PY}"
 } >> "${LOG_OUT}"
-exec "${PY}" "${PROC}" 1>>"${LOG_OUT}" 2>>"${LOG_ERR}"
+
+# send stdout/stderr to both terminal and log files
+exec "${PY}" "${PROC}" \
+  > >(tee -a "${LOG_OUT}") \
+  2> >(tee -a "${LOG_ERR}" >&2)
 EOF
   chmod +x "${RUNNER}"
-  echo "==> Created runner: ${RUNNER}"
+  _info "Created runner: ${RUNNER}"
 }
 
 install_launchagent() {
   local PLIST="${LA_DIR}/${APP_ID}.plist"
-  local SHELL_ENV=""
   if [[ -d "/opt/homebrew/bin" ]]; then
-    SHELL_ENV="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  SHELL_ENV="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   else
     SHELL_ENV="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  fi
+  # prepend our chosen BIN_DIR if it isn't already there
+  if [[ ":${SHELL_ENV}:" != *":${BIN_DIR}:"* ]]; then
+    SHELL_ENV="${BIN_DIR}:${SHELL_ENV}"
   fi
 
   cat > "${PLIST}" <<EOF
@@ -351,26 +196,23 @@ install_launchagent() {
 </plist>
 EOF
 
-  echo "==> Installed LaunchAgent: ${PLIST}"
+  _info "Installed LaunchAgent: ${PLIST}"
   launchctl unload "${PLIST}" >/dev/null 2>&1 || true
   launchctl load -w "${PLIST}"
-  echo "==> LaunchAgent loaded (will run now and on login)."
+  _info "LaunchAgent loaded (runs now and on login)."
 }
 
-# ---------- Power (no sleep) ----------
+# -------------------------
+# Sleep prevention
+# -------------------------
 disable_sleep_pmset() {
-  echo "==> Attempting to disable system sleep via pmset (may require sudo)..."
-  if command -v pmset >/dev/null 2>&1; then
-    sudo pmset -a sleep 0 || true
-    sudo pmset -a displaysleep 0 || true
-    sudo pmset -a disksleep 0 || true
-    sudo pmset -a disablesleep 1 || true
-  fi
+  require_root_for_daemons
+  _info "Disabling system sleep via pmset..."
+  sudo pmset -a sleep 0 displaysleep 0 disksleep 0 || _warn "pmset tweak failed; continuing."
 }
 
 install_caffeinate_agent() {
   local PLIST="${LA_DIR}/${CAFFEINATE_ID}.plist"
-  local CAFF_LOG="${LOG_DIR}/pqbench-caffeinate.log"
   cat > "${PLIST}" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -385,51 +227,290 @@ install_caffeinate_agent() {
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>${CAFF_LOG}</string>
-  <key>StandardErrorPath</key><string>${CAFF_LOG}</string>
+  <key>StandardOutPath</key><string>${LOG_DIR}/pqbench-caffeinate.out.log</string>
+  <key>StandardErrorPath</key><string>${LOG_DIR}/pqbench-caffeinate.err.log</string>
 </dict>
 </plist>
 EOF
-  echo "==> Installed caffeinate fallback LaunchAgent: ${PLIST}"
+  _info "Installed caffeinate LaunchAgent: ${PLIST}"
   launchctl unload "${PLIST}" >/dev/null 2>&1 || true
   launchctl load -w "${PLIST}"
-  echo "==> caffeinate agent loaded (prevents sleep as a fallback)."
 }
 
-# ---------- Smoke run ----------
-run_once_now() {
-  if [[ ! -f "${PROC}" ]]; then
-    echo "!! processor.py not found at ${PROC}"
-    exit 1
+ensure_bin_dir() {
+  # Create a writable bin dir if missing (works on both Intel & Apple Silicon VMs)
+  if [[ ! -d "${BIN_DIR}" ]]; then
+    require_root_for_daemons
+    sudo mkdir -p "${BIN_DIR}"
+    sudo chmod 755 "${BIN_DIR}"
   fi
-  echo "==> Running processor.py once to verify..."
-  MODE="${MODE}" "${PY}" "${PROC}" || true
-  echo "==> One-time run complete (logs in ${LOG_DIR})."
 }
 
+# -------------------------
+# Persistent mount_9p shared
+# -------------------------
+install_mount9p_daemon() {
+  require_root_for_daemons
+  local PLIST="/Library/LaunchDaemons/${MOUNT9P_ID}.plist"
+  # The command should be run as root at boot
+  sudo bash -c "cat > '${PLIST}'" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.pqbench.mount9p</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/sbin/mount_9p</string>
+    <string>shared</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/var/log/pqbench-mount9p.out.log</string>
+  <key>StandardErrorPath</key><string>/var/log/pqbench-mount9p.err.log</string>
+</dict>
+</plist>
+EOF
+  sudo chown root:wheel "${PLIST}"
+  sudo chmod 644 "${PLIST}"
+  _info "Installed LaunchDaemon: ${PLIST}"
+  sudo launchctl unload "${PLIST}" >/dev/null 2>&1 || true
+  sudo launchctl load -w "${PLIST}"
+  _info "Mount daemon loaded (will attempt mount_9p shared at boot)."
+}
+
+# -------------------------
+# Browser installers (idempotent)
+# -------------------------
+
+is_chrome_installed() {
+  [[ -d "/Applications/Google Chrome.app" ]] && return 0
+  [[ -d "/Applications/Google Chrome Canary.app" ]] && return 0
+  return 1
+}
+
+get_chrome_version() {
+  mdread_version "/Applications/Google Chrome.app"
+}
+
+install_chrome_and_driver() {
+  if [[ -z "${CHROME_VERSION:-}" ]]; then
+    _info "No CHROME_VERSION set (MODE=${MODE}). Skipping Chrome install."
+    return 0
+  fi
+
+  ensure_bin_dir
+
+  if is_chrome_installed; then
+    local have_ver
+    have_ver="$(get_chrome_version || true)"
+    _info "Chrome already installed (version: ${have_ver:-unknown}); skipping download."
+  else
+    _info "Installing Chrome ${CHROME_VERSION}..."
+    local ARCH CFT_BASE ZIP_URL TMP EXTRACT_DIR APP_SRC
+    ARCH="$(_mac_arch)"
+    CFT_BASE="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}"
+    if [[ "${ARCH}" == "arm64" ]]; then
+      ZIP_URL="${CFT_BASE}/mac-arm64/chrome-mac-arm64.zip"
+    else
+      ZIP_URL="${CFT_BASE}/mac-x64/chrome-mac-x64.zip"
+    fi
+
+    TMP="$(mktemp -d /tmp/pqbench.chrome.XXXXXX)"
+    EXTRACT_DIR="${TMP}/extract"
+    mkdir -p "${EXTRACT_DIR}"
+
+    _info "Downloading: ${ZIP_URL}"
+    if ! curl -fLsS "${ZIP_URL}" -o "${TMP}/chrome.zip"; then
+      _err "Download failed (404 or network). URL: ${ZIP_URL}"
+      return 1
+    fi
+
+    _info "Unzipping into ${EXTRACT_DIR} ..."
+    if ! unzip -q "${TMP}/chrome.zip" -d "${EXTRACT_DIR}"; then
+      _err "Unzip failed; archive may be corrupt."
+      rm -rf "${TMP}"
+      return 1
+    fi
+
+    # Try several patterns; some archives use 'chrome-mac*/Google Chrome for Testing.app',
+    # others slightly differ. Use a broad search and pick the first match.
+    APP_SRC="$(find "${EXTRACT_DIR}" -type d \( -iname 'Google Chrome for Testing.app' -o -iname 'Google Chrome.app' -o -ipath '*/chrome-mac*/Google Chrome*.app' \) -print -quit)"
+
+    if [[ -z "${APP_SRC}" ]]; then
+      _err "Chrome .app not found after unzip. Here are the extracted contents (depth <= 4):"
+      (cd "${EXTRACT_DIR}" && find . -maxdepth 4 -print) || true
+      rm -rf "${TMP}"
+      return 1
+    fi
+
+    require_root_for_daemons
+    # Clean any previous broken install/symlink
+    [[ -L "/Applications/Google Chrome.app" ]] && sudo rm -f "/Applications/Google Chrome.app"
+    sudo rm -rf "/Applications/Google Chrome.app" || true
+    _info "Copying ${APP_SRC} -> /Applications/Google Chrome.app"
+    sudo ditto "${APP_SRC}" "/Applications/Google Chrome.app"
+    sudo xattr -dr com.apple.quarantine "/Applications/Google Chrome.app" || true
+    rm -rf "${TMP}"
+    _info "Installed Chrome to /Applications/Google Chrome.app"
+  fi
+
+  # Install matching chromedriver if absent
+  local DRIVER_TARGET="${BIN_DIR}/chromedriver"
+  if command -v chromedriver >/dev/null 2>&1; then
+    _info "chromedriver already present at $(command -v chromedriver); skipping."
+    return 0
+  fi
+
+  _info "Installing chromedriver for Chrome ${CHROME_VERSION}..."
+  local DR_URL TMPD EXTRACT DRIVER_SRC CFT_BASE2
+  CFT_BASE2="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}"
+  if [[ "$(_mac_arch)" == "arm64" ]]; then
+    DR_URL="${CFT_BASE2}/mac-arm64/chromedriver-mac-arm64.zip"
+  else
+    DR_URL="${CFT_BASE2}/mac-x64/chromedriver-mac-x64.zip"
+  fi
+  TMPD="$(mktemp -d /tmp/pqbench.cdriver.XXXXXX)"
+  EXTRACT="${TMPD}/extract"
+  mkdir -p "${EXTRACT}"
+
+  if ! curl -fLsS "${DR_URL}" -o "${TMPD}/driver.zip"; then
+    _err "Failed to download chromedriver: ${DR_URL}"
+    rm -rf "${TMPD}"
+    return 1
+  fi
+  if ! unzip -q "${TMPD}/driver.zip" -d "${EXTRACT}"; then
+    _err "Unzip of chromedriver failed."
+    rm -rf "${TMPD}"
+    return 1
+  fi
+
+  DRIVER_SRC="$(find "${EXTRACT}" -type f -name 'chromedriver' -print -quit)"
+  if [[ -z "${DRIVER_SRC}" ]]; then
+    _err "chromedriver not found after unzip. Contents:"
+    (cd "${EXTRACT}" && find . -maxdepth 4 -print) || true
+    rm -rf "${TMPD}"
+    return 1
+  fi
+
+  require_root_for_daemons
+  sudo install -m 0755 "${DRIVER_SRC}" "${DRIVER_TARGET}"
+  rm -rf "${TMPD}"
+  _info "chromedriver installed to ${DRIVER_TARGET}"
+}
+
+
+is_firefox_installed() {
+  [[ -d "/Applications/Firefox.app" ]] && return 0
+  return 1
+}
+
+get_firefox_version() {
+  mdread_version "/Applications/Firefox.app"
+}
+
+install_firefox_and_geckodriver() {
+  if [[ -z "${FIREFOX_VERSION:-}" ]]; then
+    _info "No FIREFOX_VERSION set (MODE=${MODE}). Skipping Firefox install."
+    return 0
+  fi
+
+  ensure_bin_dir
+
+  if is_firefox_installed; then
+    local have_ver
+    have_ver="$(get_firefox_version || true)"
+    _info "Firefox already installed (version: ${have_ver:-unknown}); skipping download."
+  else
+    _info "Installing Firefox ${FIREFOX_VERSION}..."
+    local ARCH
+    if [[ "$(_mac_arch)" == "arm64" ]]; then
+      ARCH="aarch64"
+    else
+      ARCH="x86_64"
+    fi
+    # Official release DMG archive (cdn.mozilla.net)
+    local TMP; TMP="$(mktemp -d /tmp/pqbench.firefox.XXXXXX)"
+    local DMG="${TMP}/Firefox-${FIREFOX_VERSION}.dmg"
+    local MNT="${TMP}/mnt"
+    # en-US locale; adjust if you need a different locale.
+    local URL="https://download-installer.cdn.mozilla.net/pub/firefox/releases/${FIREFOX_VERSION}/mac/en-US/Firefox%20${FIREFOX_VERSION}.dmg"
+
+    _info "Downloading: ${URL}"
+    if ! curl -fLso "${DMG}" "${URL}"; then
+      _err "Failed to download Firefox DMG (404 or network). URL: ${URL}"
+      rm -rf "${TMP}"
+      return 1
+    fi
+
+    mkdir -p "${MNT}"
+    if ! hdiutil attach "${DMG}" -mountpoint "${MNT}" -nobrowse -quiet; then
+      _err "hdiutil attach failed."
+      rm -rf "${TMP}"
+      return 1
+    fi
+
+  require_root_for_daemons
+  sudo rm -rf "/Applications/Firefox.app" || true
+  sudo ditto "${MNT}/Firefox.app" "/Applications/Firefox.app"
+  hdiutil detach "${MNT}" -quiet || true
+  rm -rf "${TMP}"
+  fi
+
+  # Geckodriver (install only if not present). Pick a broadly compatible version.
+  if command -v geckodriver >/dev/null 2>&1; then
+    _info "geckodriver already present at $(command -v geckodriver); skipping."
+    return 0
+  fi
+
+  _info "Installing geckodriver..."
+  local GD_VER="0.34.0"
+  local GD_TGZ
+  if [[ "$(_mac_arch)" == "arm64" ]]; then
+    GD_TGZ="geckodriver-v${GD_VER}-macos-aarch64.tar.gz"
+  else
+    GD_TGZ="geckodriver-v${GD_VER}-macos.tar.gz"
+  fi
+  local TMP; TMP="$(mktemp -d /tmp/pqbench.gd.XXXXXX)"
+  curl -fsSLo "${TMP}/${GD_TGZ}" "https://github.com/mozilla/geckodriver/releases/download/v${GD_VER}/${GD_TGZ}"
+  tar -xzf "${TMP}/${GD_TGZ}" -C "${TMP}"
+  require_root_for_daemons
+  sudo install -m 0755 "${TMP}/geckodriver" "${BIN_DIR}/geckodriver"
+  rm -rf "${TMP}"
+  _info "geckodriver installed to ${BIN_DIR}/geckodriver"
+}
+
+install_browsers() {
+  choose_browser_versions
+  if [[ -z "${CHROME_VERSION}" && -z "${FIREFOX_VERSION}" ]]; then
+    _info "MODE=${MODE} => No browser installs requested."
+    return 0
+  fi
+  install_chrome_and_driver
+  install_firefox_and_geckodriver
+}
+
+# -------------------------
+# Orchestration
+# -------------------------
 main() {
-  # 9P now + persistent
-  mount9p_now
-  install_mount9p_daemon
-
-  # Tooling & Python
+  _info "PQBench macOS setup (MODE=${MODE})"
+  ensure_dirs
   ensure_python
-  setup_venv
-
-  # Browsers + drivers (based on MODE)
-  install_browsers
-
-  # Launches & power settings
+  create_venv_install_deps
   make_runner
   install_launchagent
   disable_sleep_pmset
   install_caffeinate_agent
+  install_mount9p_daemon
+  install_browsers
 
-  # Test run
-  run_once_now
-
-  echo "==> Done. ${APP_ID} is configured to run on login and KeepAlive."
-  echo "==> 9P 'shared' will auto-mount at boot via ${MOUNT9P_ID}."
+  _info "Done. Logs: ${LOG_DIR}"
+  _info "Processor will also (re)start via LaunchAgent on login."
+  _info "Starting processor.py now..."
+  "${RUNNER}"
 }
+
 
 main "$@"

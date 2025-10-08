@@ -14,4 +14,8 @@ mkdir -p "${LOG_DIR}"
   echo "Repo: ${REPO_DIR}"
   echo "Python: ${PY}"
 } >> "${LOG_OUT}"
-exec "${PY}" "${PROC}" 1>>"${LOG_OUT}" 2>>"${LOG_ERR}"
+
+# send stdout/stderr to both terminal and log files
+exec "${PY}" "${PROC}" \
+  > >(tee -a "${LOG_OUT}") \
+  2> >(tee -a "${LOG_ERR}" >&2)
