@@ -16,7 +16,7 @@ set -euo pipefail
 MODE="${MODE:-nonpq}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ID="com.pqbench.processor"
-VENV_DIR="${REPO_DIR}/.venv"
+VENV_DIR="${HOME}/.pqbench_venv"
 REQ="${REPO_DIR}/requirements.txt"
 RUNNER="${REPO_DIR}/run_processor.sh"
 LOG_DIR="${HOME}/Library/Logs"
@@ -103,25 +103,73 @@ ensure_dirs() {
 # -------------------------
 # Python & venv
 # -------------------------
+# This global variable will hold the path to the reliable Python executable
+PYTHON_EXECUTABLE=""
+
 ensure_python() {
-  if ! command -v python3 >/dev/null 2>&1; then
-    _err "python3 not found. Install Xcode CLT or Python via Homebrew, then re-run."
+  _info "Ensuring a reliable Python installation via Homebrew..."
+
+  # Determine expected Homebrew Python path based on Mac architecture
+  local brew_python_path
+  if [[ "$(_mac_arch)" == "arm64" ]]; then
+    brew_python_path="/opt/homebrew/bin/python3"
+  else
+    brew_python_path="/usr/local/bin/python3"
+  fi
+
+  # 1. Check if a reliable Homebrew Python already exists
+  if [[ -x "$brew_python_path" ]]; then
+    _info "Found reliable Homebrew Python at: ${brew_python_path}"
+    PYTHON_EXECUTABLE="$brew_python_path"
+    return 0
+  fi
+
+  # 2. If not found, ensure Homebrew itself is installed
+  _warn "Reliable Python not found. Checking for Homebrew..."
+  if ! command -v brew >/dev/null 2>&1; then
+    _warn "Homebrew not found. Installing Homebrew (this may take a few minutes)..."
+    # Run the official, non-interactive installer
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+    # For Apple Silicon (arm64), we must add brew to the PATH for the current script session
+    if [[ "$(_mac_arch)" == "arm64" ]]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    fi
+  fi
+
+  # 3. Now that brew is available, install Python
+  _info "Installing Python via Homebrew..."
+  brew install python
+
+  # 4. Verify the installation and set the global variable for other functions
+  if [[ -x "$brew_python_path" ]]; then
+    _info "Successfully installed Python at: ${brew_python_path}"
+    PYTHON_EXECUTABLE="$brew_python_path"
+  else
+    _err "Failed to install or find Python via Homebrew at the expected path: ${brew_python_path}"
+    _err "Please check the Homebrew installation and try again."
     exit 1
   fi
-  _info "Python3 found: $(python3 --version)"
 }
 
 create_venv_install_deps() {
-  if [[ ! -d "${VENV_DIR}" ]]; then
-    _info "Creating venv at ${VENV_DIR}"
-    python3 -m venv "${VENV_DIR}"
+  # This function now relies on the PYTHON_EXECUTABLE variable being set correctly
+  if [[ -z "${PYTHON_EXECUTABLE}" ]]; then
+      _err "PYTHON_EXECUTABLE variable is not set. This should not happen. Aborting."
+      exit 1
   fi
+
+  if [[ ! -d "${VENV_DIR}" ]]; then
+    _info "Creating venv at ${VENV_DIR} using ${PYTHON_EXECUTABLE}"
+    # Use the specific, verified Python executable to create the venv
+    "${PYTHON_EXECUTABLE}" -m venv "${VENV_DIR}"
+  fi
+
   # shellcheck disable=SC1091
   source "${VENV_DIR}/bin/activate"
   python -m pip install --upgrade pip
   if [[ -f "${REQ}" ]]; then
     _info "Installing Python deps from ${REQ}"
-    # macOS venvs often don't need --break-system-packages; omit to be safe.
     python -m pip install -r "${REQ}"
   else
     _warn "No requirements.txt found; skipping pip install."
@@ -134,23 +182,52 @@ create_venv_install_deps() {
 make_runner() {
   cat > "${RUNNER}" <<'EOF'
 #!/usr/bin/env bash
-set -euo pipefail
+# We are removing 'set -e' for debugging so the script doesn't exit prematurely
+set -uo pipefail
+
 MODE="${MODE:-nonpq}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="${REPO_DIR}/.venv"
+VENV_DIR="${HOME}/.pqbench_venv"
 PY="${VENV_DIR}/bin/python"
 PROC="${REPO_DIR}/processor.py"
 LOG_DIR="${HOME}/Library/Logs"
 LOG_OUT="${LOG_DIR}/pqbench-processor.out.log"
 LOG_ERR="${LOG_DIR}/pqbench-processor.err.log"
 mkdir -p "${LOG_DIR}"
-{
-  echo "=== $(date) :: Starting processor (MODE=${MODE}) ==="
-  echo "Repo: ${REPO_DIR}"
-  echo "Python: ${PY}"
-} >> "${LOG_OUT}"
+
+# --- Forensic Logging ---
+echo "--- [DEBUG] run_processor.sh started at $(date) ---" >> "${LOG_OUT}"
+echo "--- [DEBUG] REPO_DIR is ${REPO_DIR}" >> "${LOG_OUT}"
+echo "--- [DEBUG] VENV_DIR is ${VENV_DIR}" >> "${LOG_OUT}"
+
+# --- Wait for the shared volume to be mounted after a reboot ---
+echo "--- [DEBUG] Checking for processor script at ${PROC}..." >> "${LOG_OUT}"
+MAX_RETRIES=12 # 60 seconds total wait
+RETRY_COUNT=0
+while [[ ! -f "${PROC}" ]]; do
+  if (( RETRY_COUNT >= MAX_RETRIES )); then
+    echo "--- [FATAL] Processor script not found at ${PROC} after ${MAX_RETRIES} retries. Is /Volumes/shared mounted? Exiting." >> "${LOG_ERR}"
+    exit 1
+  fi
+  echo "--- [DEBUG] Attempt #${RETRY_COUNT}: ${PROC} not found. Waiting 5s..." >> "${LOG_OUT}"
+  sleep 5
+  RETRY_COUNT=$((RETRY_COUNT + 1))
+done
+echo "--- [DEBUG] OK: Processor script found at ${PROC}." >> "${LOG_OUT}"
+# -----------------------------------------------------------------
+
+# --- Check for Python virtual environment ---
+echo "--- [DEBUG] Checking for Python executable at ${PY}..." >> "${LOG_OUT}"
+if [[ ! -x "${PY}" ]]; then
+    echo "--- [FATAL] Python executable not found at ${PY}. The venv might be corrupted or missing. Exiting." >> "${LOG_ERR}"
+    exit 1
+fi
+echo "--- [DEBUG] OK: Python executable found." >> "${LOG_OUT}"
+# -----------------------------------------------------------------
+
 
 # send stdout/stderr to both terminal and log files
+echo "--- [DEBUG] Starting Python process now... ---" >> "${LOG_OUT}"
 exec "${PY}" "${PROC}" \
   > >(tee -a "${LOG_OUT}") \
   2> >(tee -a "${LOG_ERR}" >&2)
@@ -249,36 +326,137 @@ ensure_bin_dir() {
 # -------------------------
 # Persistent mount_9p shared
 # -------------------------
-install_mount9p_daemon() {
-  require_root_for_daemons
-  local PLIST="/Library/LaunchDaemons/${MOUNT9P_ID}.plist"
-  # The command should be run as root at boot
-  sudo bash -c "cat > '${PLIST}'" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
- "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>com.pqbench.mount9p</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/usr/sbin/mount_9p</string>
-    <string>shared</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/var/log/pqbench-mount9p.out.log</string>
-  <key>StandardErrorPath</key><string>/var/log/pqbench-mount9p.err.log</string>
-</dict>
-</plist>
-EOF
-  sudo chown root:wheel "${PLIST}"
-  sudo chmod 644 "${PLIST}"
-  _info "Installed LaunchDaemon: ${PLIST}"
-  sudo launchctl unload "${PLIST}" >/dev/null 2>&1 || true
-  sudo launchctl load -w "${PLIST}"
-  _info "Mount daemon loaded (will attempt mount_9p shared at boot)."
+#install_mount9p_daemon() {
+#  require_root_for_daemons
+#  local PLIST="/Library/LaunchDaemons/${MOUNT9P_ID}.plist"
+#  # The command should be run as root at boot
+#  sudo bash -c "cat > '${PLIST}'" <<'EOF'
+#<?xml version="1.0" encoding="UTF-8"?>
+#<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+# "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+#<plist version="1.0">
+#<dict>
+#  <key>Label</key><string>com.pqbench.mount9p</string>
+#  <key>ProgramArguments</key>
+#  <array>
+#    <string>/usr/sbin/mount_9p</string>
+#    <string>shared</string>
+#  </array>
+#  <key>RunAtLoad</key><true/>
+#  <key>KeepAlive</key><true/>
+#  <key>StandardOutPath</key><string>/var/log/pqbench-mount9p.out.log</string>
+#  <key>StandardErrorPath</key><string>/var/log/pqbench-mount9p.err.log</string>
+#</dict>
+#</plist>
+#EOF
+#  sudo chown root:wheel "${PLIST}"
+#  sudo chmod 644 "${PLIST}"
+#  _info "Installed LaunchDaemon: ${PLIST}"
+#  sudo launchctl unload "${PLIST}" >/dev/null 2>&1 || true
+#  sudo launchctl load -w "${PLIST}"
+#  _info "Mount daemon loaded (will attempt mount_9p shared at boot)."
+#}
+
+configure_passwordless_sudo() {
+  _info "Configuring passwordless sudo for mount_9p..."
+  local SUDOERS_RULE="test ALL=(ALL) NOPASSWD: /sbin/mount_9p"
+  local SUDOERS_FILE="/etc/sudoers.d/pqbench-mount-helper"
+
+  # Check if the rule is already in place
+  if sudo grep -qF -- "${SUDOERS_RULE}" "${SUDOERS_FILE}" 2>/dev/null; then
+    _info "Passwordless sudo rule already exists."
+    return 0
+  fi
+
+  # Add the rule using a method that doesn't require manual editing
+  echo "${SUDOERS_RULE}" | sudo tee "${SUDOERS_FILE}" > /dev/null
+  sudo chmod 440 "${SUDOERS_FILE}"
+  _info "Successfully configured passwordless sudo."
 }
+
+add_mount_to_profile() {
+  _info "Ensuring correct mount command in user login profile (~/.zprofile)..."
+  local PROFILE_FILE="${HOME}/.zprofile"
+  local CORRECT_MOUNT_CMD="sudo /sbin/mount_9p shared" # Correct path
+  local MARKER_START="# Automatically mount shared volume for PQBench (if not mounted)"
+  local TEMP_PROFILE="/tmp/.zprofile_temp.$$" # Temporary file
+
+  # Create the file if it doesn't exist
+  touch "${PROFILE_FILE}"
+
+  # Check if the correct block already exists
+  # Use grep with -A to check if the command follows the marker comment
+  if grep -qF -- "${MARKER_START}" "${PROFILE_FILE}" && \
+     grep -A 3 -F -- "${MARKER_START}" "${PROFILE_FILE}" | grep -qF -- "${CORRECT_MOUNT_CMD}"; then
+     _info "Correct mount command block already present in ${PROFILE_FILE}."
+     return 0
+  fi
+
+  _info "Updating mount command block in ${PROFILE_FILE}..."
+
+  # Create a backup
+  cp "${PROFILE_FILE}" "${PROFILE_FILE}.bak.$(date +%s)"
+
+  # Use awk to remove the entire old block related to PQBench mounting
+  # and then add the new block at the end.
+  awk -v marker="${MARKER_START}" -v cmd="${CORRECT_MOUNT_CMD}" '
+    BEGIN { skip=0 }
+    $0 == marker { skip=1; next } # Start skipping when marker found
+    skip && /fi/ { skip=0; next } # Stop skipping after fi
+    !skip { print }               # Print lines that are not skipped
+    END {
+      # Add the correct block at the very end
+      print "" # Ensure newline before adding
+      print marker
+      print "if ! mount | grep -q '\''on /Volumes/shared'\''; then"
+      print "  " cmd
+      print "fi"
+    }
+  ' "${PROFILE_FILE}" > "${TEMP_PROFILE}" && mv "${TEMP_PROFILE}" "${PROFILE_FILE}"
+
+  _info "Updated ${PROFILE_FILE} with correct mount command block."
+}
+
+disable_lockscreen_autologin() {
+  _info "Attempting to disable lock screen and enable auto-login..."
+  local CURRENT_USER=$(whoami) # Should be 'test' in your case
+
+  # 1. Disable password requirement after sleep/screensaver
+  _info "Disabling password requirement after sleep/screensaver..."
+  defaults write com.apple.screensaver askForPassword -int 0 || _warn "Failed to set askForPassword via defaults."
+
+  # 2. Enable automatic login (MOST DANGEROUS PART)
+  _info "Attempting to enable automatic login for user ${CURRENT_USER}..."
+
+  local USER_PASSWORD
+  # Prompt for the password securely
+  _warn "Enabling auto-login requires your macOS user password."
+  _warn "SECURITY RISK: Storing credentials for auto-login is insecure."
+  _warn "Ensure this VM is only used for testing and the host is secure."
+  read -sp "Enter password for user '${CURRENT_USER}' to enable auto-login: " USER_PASSWORD
+  echo # Add a newline after the password input for cleaner output
+
+  # Check if a password was entered
+  if [[ -z "${USER_PASSWORD}" ]]; then
+    _err "Password not provided. Skipping auto-login configuration."
+    return 1 # Exit the function, do not proceed with auto-login setup
+  fi
+
+  # Create the kcpassword file needed for auto login
+  _info "Creating /etc/kcpassword file..."
+  local KCPASS_OCTAL=$(printf '%s' "${USER_PASSWORD}" | xxd -p | tr -d '\n' | sed 's/\(..\)/\\\1/g')
+  sudo bash -c "echo -n -e '${KCPASS_OCTAL}' > /etc/kcpassword"
+  sudo chmod 600 /etc/kcpassword
+  sudo chown root:wheel /etc/kcpassword
+
+  # Tell loginwindow to use auto-login
+  _info "Setting autoLoginUser preference..."
+  sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser "${CURRENT_USER}"
+
+  _info "Configuration for disabling lock screen and enabling auto-login applied (effectiveness may vary)."
+  _warn "SECURITY RISK: Automatic login is enabled. Ensure the host machine is secure."
+}
+
 
 # -------------------------
 # Browser installers (idempotent)
@@ -497,19 +675,24 @@ install_browsers() {
 main() {
   _info "PQBench macOS setup (MODE=${MODE})"
   ensure_dirs
+  configure_passwordless_sudo
+  add_mount_to_profile
   ensure_python
   create_venv_install_deps
   make_runner
   install_launchagent
   disable_sleep_pmset
   install_caffeinate_agent
-  install_mount9p_daemon
+#  install_mount9p_daemon
+  disable_lockscreen_autologin
   install_browsers
 
   _info "Done. Logs: ${LOG_DIR}"
   _info "Processor will also (re)start via LaunchAgent on login."
-  _info "Starting processor.py now..."
-  "${RUNNER}"
+#  _info "Stopping background service to run in foreground..."
+#  launchctl unload "${LA_DIR}/${APP_ID}.plist" >/dev/null 2>&1 || true
+#  _info "Starting processor.py now..."
+#  "${RUNNER}"
 }
 
 

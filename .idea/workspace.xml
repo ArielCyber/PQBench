@@ -5,13 +5,14 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="cf6a7724-a771-4b0b-ab60-4e871226e0b5" name="Changes" comment="Changed the base image to dockurr/macos.&#10;Changed the first time installation to be more main-stream.&#10;Added the function to open processor on startup.&#10;Removed sleep from the containers.">
+      <change beforePath="$PROJECT_DIR$/.idea/PQBench.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/PQBench.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/shared/processor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/run.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared/run_kyber.sh" beforeDir="false" afterPath="$PROJECT_DIR$/shared/run_kyber.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared/run_mlkem.sh" beforeDir="false" afterPath="$PROJECT_DIR$/shared/run_mlkem.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/shared/run_processor.sh" beforeDir="false" afterPath="$PROJECT_DIR$/shared/run_processor.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/setup_macos.sh" beforeDir="false" afterPath="$PROJECT_DIR$/shared/setup_macos_previous.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/static/kyber_page.html" beforeDir="false" afterPath="$PROJECT_DIR$/shared/static/kyber_page.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shared/static/mlkem_page.html" beforeDir="false" afterPath="$PROJECT_DIR$/shared/static/mlkem_page.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shared/setup_macos.sh" beforeDir="false" afterPath="$PROJECT_DIR$/shared/setup_macos.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -39,12 +40,12 @@
     &quot;assignee&quot;: &quot;arielya2001&quot;
   }
 }</component>
-  <component name="GithubPullRequestsUISettings">{
-  &quot;selectedUrlAndAccountId&quot;: {
-    &quot;url&quot;: &quot;https://github.com/ArielCyber/PQBench.git&quot;,
-    &quot;accountId&quot;: &quot;4cd3a6ca-0209-4a34-a3a0-132a296402b5&quot;
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/ArielCyber/PQBench",
+    "accountId": "2abd7117-1f4e-4ebb-8bae-a5b9c1bd16fb"
   }
-}</component>
+}]]></component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 3
 }</component>
@@ -60,7 +61,7 @@
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;SHELLCHECK.PATH&quot;: &quot;C:\\Users\\shake\\AppData\\Roaming\\JetBrains\\PyCharm2025.2\\plugins\\Shell Script\\shellcheck.exe&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;MacOS&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;MacOS-Container&quot;,
     &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
     &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
     &quot;last_opened_file_path&quot;: &quot;C:/Users/shake/Documents/GitHub/PQBench&quot;,
@@ -121,8 +122,8 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-b598e85cdad2-JavaScript-PY-252.25557.130" />
-        <option value="bundled-python-sdk-1bde30d8e611-7b97d883f26b-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-252.25557.130" />
+        <option value="bundled-js-predefined-d6986cc7102b-1632447f56bf-JavaScript-PY-243.26053.29" />
+        <option value="bundled-python-sdk-b1dbf8ef85a6-4df51de95216-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-243.26053.29" />
       </set>
     </attachedChunks>
   </component>
@@ -147,6 +148,7 @@
       <workItem from="1759229308347" duration="7844000" />
       <workItem from="1759311778007" duration="11929000" />
       <workItem from="1759939527905" duration="1310000" />
+      <workItem from="1760608428043" duration="17855000" />
     </task>
     <task id="LOCAL‎-00001" summary="update README">
       <option name="closed" value="true" />
