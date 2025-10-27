@@ -4,10 +4,10 @@ services:
     image: switcher:latest
     container_name: switcher_container
     command: >
-      gunicorn -w 2 -k gthread --threads 4 -t 120 -b 0.0.0.0:5000
+      gunicorn -w 2 -k gthread --threads 4 -t 0 -b 0.0.0.0:5000 
       --access-logfile - --error-logfile -
       switcher:app
-
+    # -t 0 = no gunicorn timeout kill
     ports: [ "5000:5000" ]
     environment:
       SNIFFER_URL: "http://172.18.0.1:8080"
@@ -31,6 +31,11 @@ services:
     networks: [appnet]
 
   linux-kyber:
+    shm_size: "1g"        # << big shared memory helps Chrome a lot
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     build:
       context: ./sender_linux
       dockerfile: Dockerfile_Linux_Kyber
@@ -62,17 +67,17 @@ services:
       retries: 5
       start_period: 5s
 
-  agent-worker:
-    build:
-      context: agent
-      dockerfile: Dockerfile_Agent    # <- this is the agent Dockerfile above
-    image: agent:latest
-    container_name: agent_container
-    environment:
-      ENTRY_CONTROLLER_URL: "http://switcher:5000/config"
-      INTERVAL_SEC: "60"        # change cadence if you want
-    restart: unless-stopped
-    networks: [appnet]
+#  agent-worker:
+#    build:
+#      context: agent
+#      dockerfile: Dockerfile_Agent    # <- this is the agent Dockerfile above
+#    image: agent:latest
+#    container_name: agent_container
+#    environment:
+#      ENTRY_CONTROLLER_URL: "http://switcher:5000/config"
+#      INTERVAL_SEC: "60"        # change cadence if you want
+#    restart: unless-stopped
+#    networks: [appnet]
 
   sniffer:
     build:
@@ -91,7 +96,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # to inspect/exec into other containers
       - ./output:/output
     healthcheck:
-      test: [ "CMD", "curl", "-fsS", "http://localhost:5000/health" ]
+      test: [ "CMD", "curl", "-fsS", "http://localhost:8080/health" ]
       interval: 60s
       timeout: 3s
       retries: 5
@@ -99,62 +104,62 @@ services:
   # Estimated first install + boot time - 20~ minutes
   # Estimated non first time startup - 1.5~ minutes
   # Windows VM that will run the windows processor
-  win-kyber:
-    image: dockurr/windows
-    container_name: win-kyber
-    environment:
-      VERSION: "2025"
-      EDITION: "core"
-      RAM_SIZE: "6G"
-      DISK_SIZE: "40G"
-      CPU_CORES: "2"
-      USERNAME: "Docker"      # default user (can change)
-      PASSWORD: "admin"       # default pass (can change)
-      # Optional: give Windows its own L2 IP later (see macvlan note)
-      # DHCP: "Y"
-      ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to work : https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
-    devices:
-      - /dev/kvm
-      - /dev/net/tun
-    cap_add:
-      - NET_ADMIN
-    ports:
-      - "8006:8006"           # web viewer (install phase / emergency)
-      - "5003:5000"           # Flask inside Windows -> exposed as 5001 on host/network
-    volumes:
-      - ./sender_windows/oem/kyber:/oem      # auto-run installer at first boot
-      - ./sender_windows/:/data              # shows up inside Windows as \\host.lan\Data
-      - ./sender_windows/windows-kyber:/storage
-    restart: unless-stopped
-    stop_grace_period: 2m
-    networks: [appnet]
-
-  # Windows VM that will run the windows processor
-  win-mlkem:
-    image: dockurr/windows
-    container_name: win-mlkem
-    environment:
-      VERSION: "2025"
-      RAM_SIZE: "6G"
-      EDITION: "core"
-      DISK_SIZE: "40G"
-      CPU_CORES: "2"
-      ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to boot consistently: https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
-    devices:
-      - /dev/kvm
-      - /dev/net/tun
-    cap_add:
-      - NET_ADMIN
-    ports:
-      - "8007:8006"
-      - "5004:5000"
-    volumes:
-      - ./sender_windows/oem/mlkem:/oem
-      - ./sender_windows/:/data
-      - ./sender_windows/windows-mlkem:/storage
-    restart: unless-stopped
-    stop_grace_period: 2m
-    networks: [appnet]
+#  win-kyber:
+#    image: dockurr/windows
+#    container_name: win-kyber
+#    environment:
+#      VERSION: "2025"
+#      EDITION: "core"
+#      RAM_SIZE: "6G"
+#      DISK_SIZE: "40G"
+#      CPU_CORES: "2"
+#      USERNAME: "Docker"      # default user (can change)
+#      PASSWORD: "admin"       # default pass (can change)
+#      # Optional: give Windows its own L2 IP later (see macvlan note)
+#      # DHCP: "Y"
+#      ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to work : https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
+#    devices:
+#      - /dev/kvm
+#      - /dev/net/tun
+#    cap_add:
+#      - NET_ADMIN
+#    ports:
+#      - "8006:8006"           # web viewer (install phase / emergency)
+#      - "5003:5000"           # Flask inside Windows -> exposed as 5001 on host/network
+#    volumes:
+#      - ./sender_windows/oem/kyber:/oem      # auto-run installer at first boot
+#      - ./sender_windows/:/data              # shows up inside Windows as \\host.lan\Data
+#      - ./sender_windows/windows-kyber:/storage
+#    restart: unless-stopped
+#    stop_grace_period: 2m
+#    networks: [appnet]
+#
+#  # Windows VM that will run the windows processor
+#  win-mlkem:
+#    image: dockurr/windows
+#    container_name: win-mlkem
+#    environment:
+#      VERSION: "2025"
+#      RAM_SIZE: "6G"
+#      EDITION: "core"
+#      DISK_SIZE: "40G"
+#      CPU_CORES: "2"
+#      ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to boot consistently: https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
+#    devices:
+#      - /dev/kvm
+#      - /dev/net/tun
+#    cap_add:
+#      - NET_ADMIN
+#    ports:
+#      - "8007:8006"
+#      - "5004:5000"
+#    volumes:
+#      - ./sender_windows/oem/mlkem:/oem
+#      - ./sender_windows/:/data
+#      - ./sender_windows/windows-mlkem:/storage
+#    restart: unless-stopped
+#    stop_grace_period: 2m
+#    networks: [appnet]
 
 networks:
   appnet:
