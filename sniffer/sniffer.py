@@ -338,6 +338,11 @@ def _split_streams_tshark(input_pcap: str, output_dir: str, dir_code, timestamp,
 
 
 def _resolve_ip_from_url(url: str) -> str:
+    """
+    Converts given URL to an IPv4 address.
+    :param url: URL to resolve
+    :return: IPv4 address
+    """
     host = urlparse(url).hostname
     if not host:
         raise ValueError(f"Invalid url: {url}")
@@ -345,6 +350,15 @@ def _resolve_ip_from_url(url: str) -> str:
 
 
 def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | None = None):
+    """
+    This function is responsible for capturing the network traffic
+    defined by the child session's BPF,
+    :param session_id: the session ID
+    :param duration: the duration of the capture
+    :param timestamp: the timestamp of the capture
+    :param armed_evt: an Event or None
+    :return: None
+    """
     child_session = _sessions.get(session_id)
     if not child_session:
         return
@@ -395,6 +409,12 @@ def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | N
 
 @app.post("/start", response_model=StartResponseMulti)
 def start_batch(request: StartBatchRequest):
+    """
+    This function is responsible for starting a batch of sessions.
+    It builds the BPF, arms the thread and creates the output directory.
+    :param request: StartBatchRequest object
+    :return: StartResponseMulti object
+    """
     log.debug("/start (batch) called: %s", request.model_dump())
 
     if not request.targets:
