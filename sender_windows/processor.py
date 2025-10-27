@@ -185,7 +185,7 @@ def open_browser(browser: str, algo: int):
 
 def open_firefox(algo):
     """
-    Launch a Selenium WebDriver for Firefox with a given Algo.
+    Launch a Selenium WebDriver for Firefox with a given algorithm.
     """
     logging.debug("Trying to open Firefox")
 
@@ -214,6 +214,9 @@ def open_firefox(algo):
 
 
 def open_chrome(algo):
+    """
+    Launch a Selenium WebDriver for Chrome with a given algorithm.
+    """
     chrome_opts = webdriver.ChromeOptions()
 
     # Headless Chrome
