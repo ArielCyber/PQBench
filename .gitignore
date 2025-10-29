@@ -4,3 +4,6 @@
 /sender_windows/windows-kyber
 /sender_windows/windows-mlkem
 *.im1
+/shared
+/macos-mlkem
+/macos-kyber
