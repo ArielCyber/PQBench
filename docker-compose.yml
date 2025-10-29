@@ -52,6 +52,11 @@ services:
       start_period: 5s
 
   linux-mlkem:
+    shm_size: "1g"        # << big shared memory helps Chrome a lot
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     build:
       context: ./sender_linux
       dockerfile: Dockerfile_Linux_MLKEM

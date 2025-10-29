@@ -224,6 +224,7 @@ def _split_streams_tshark(input_pcap: str, output_dir: str, dir_code, timestamp,
     """
 
     try:
+        log.info("Starting stream split for %s", input_pcap)
         os.makedirs(output_dir, exist_ok=True)
         # dbg is just a debug information accumulator — a dictionary that collects
         # all the reasoning about which streams were kept or dropped and why.
@@ -336,6 +337,9 @@ def _split_streams_tshark(input_pcap: str, output_dir: str, dir_code, timestamp,
     except Exception as e:
         log.exception(f"Unexpected error during stream split: {e}")
 
+    log.info("Completed stream split: kept=%d dropped=%d",
+             len(dbg["kept"]), len(dbg["dropped"]))
+
 
 def _resolve_ip_from_url(url: str) -> str:
     """
@@ -371,14 +375,47 @@ def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | N
         sniffer = AsyncSniffer(iface=child_session.iface, filter=child_session.bpf, store=True)
         _sniffer_handles[session_id] = sniffer
         sniffer.start()
+        log.info("[%s] sniffer armed (iface=%s, output=%s)", session_id, child_session.iface, child_session.outfile)
         if armed_evt is not None:
             armed_evt.set()  # signal: sniffer armed
 
-        # Wait until duration elapses OR someone calls /done (stop_evt.set())
-        if stop_evt is not None:
-            stop_evt.wait(timeout=duration)
-        else:
-            time.sleep(duration)
+        # # Wait until duration elapses OR someone calls /done (stop_evt.set())
+        # if stop_evt is not None:
+        #     stop_evt.wait(timeout=duration)
+        # else:
+        #     time.sleep(duration)
+
+        # Monitor + wait: stop event OR duration
+        poll_log_interval = 30  # seconds
+        last_size = -1
+        start_time = time.time()
+
+        while True:
+            # check stop event
+            if stop_evt is not None and stop_evt.is_set():
+                log.info("[%s] stop_evt detected → stopping sniffer", session_id)
+                break
+
+            # check timeout
+            elapsed = time.time() - start_time
+            if elapsed >= duration:
+                log.info("[%s] duration reached (elapsed=%.1fs / duration=%.1fs) → stopping sniffer",
+                         session_id, elapsed, duration)
+                break
+
+            # file growth debug
+            if os.path.exists(child_session.outfile):
+                size = os.path.getsize(child_session.outfile)
+                if size != last_size:
+                    delta = (size - last_size) if last_size >= 0 else size
+                    log.debug("[%s] pcap size: %d bytes (+%d)", session_id, size, delta)
+                    last_size = size
+                else:
+                    log.debug("[%s] pcap steady at %d bytes", session_id, size)
+            else:
+                log.debug("[%s] pcap not created yet", session_id)
+
+            time.sleep(poll_log_interval)
 
         packets = sniffer.stop()
         child_session.packets = len(packets) if packets is not None else 0
@@ -405,6 +442,132 @@ def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | N
         child_session.done = True
         _sniffer_handles.pop(session_id, None)
         _stop_events.pop(session_id, None)
+
+
+def _monitor_progress(session_id: str):
+    """
+    Periodically scan the growing raw pcap and count *qualified* TLS streams:
+      - contains ClientHello AND ServerHello
+      - has >= min_packets TCP frames
+      - (optional) require TLS AppData frames
+
+    When qualified_count >= session_count -> signal stop.
+    """
+
+    logging.debug(f"Monitoring {session_id}")
+    cs = _sessions.get(session_id)
+    if not cs:
+        return
+
+    # --- knobs (match splitter defaults) ---
+    poll_interval = float(os.getenv("SNIFFER_POLL_INTERVAL_SEC", "2"))
+    min_packets = int(os.getenv("SNIFFER_MIN_PACKETS", "30"))
+    require_appdata = os.getenv("SNIFFER_REQUIRE_APPDATA", "false").lower() in {"1","true","yes"}
+    force_tls_port = os.getenv("SNIFFER_TLS_PORT", "443")  # set ""/None to skip decode-as
+
+    # Small helper to build the decode-as flag set
+    def _decode_args():
+        return ["-d", f"tcp.port=={force_tls_port},ssl"] if force_tls_port else []
+
+    # Efficiently list candidate streams by ClientHello
+    def _list_clienthello_streams() -> list[str]:
+        cmd = ["tshark", "-r", cs.outfile, *_decode_args(),
+               "-Y", "tls.handshake.type==1", "-T", "fields", "-e", "tcp.stream"]
+        out = subprocess.check_output(cmd, text=True)
+        return sorted({s for s in out.splitlines() if s.strip().isdigit()})
+
+    def _has_serverhello(stream_id: str) -> bool:
+        cmd = ["tshark", "-r", cs.outfile, *_decode_args(),
+               "-Y", f"tcp.stream=={stream_id} && tls.handshake.type==2", "-c", "1"]
+        rc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode
+        return rc == 0
+
+    def _has_appdata(stream_id: str) -> bool:
+        cmd = ["tshark", "-r", cs.outfile, *_decode_args(),
+               "-Y", f"tcp.stream=={stream_id} && tls.record.content_type==23", "-c", "1"]
+        rc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode
+        return rc == 0
+
+    def _tcp_packet_count(stream_id: str) -> int:
+        cmd = ["tshark", "-r", cs.outfile, "-Y", f"tcp.stream=={stream_id} && tcp",
+               "-T", "fields", "-e", "frame.number"]
+        out = subprocess.check_output(cmd, text=True)
+        return sum(1 for ln in out.splitlines() if ln.strip())
+
+    # To avoid stopping on a transient count during growth, require the count
+    # to be stable (same or higher) across 2 consecutive polls.
+    last_qualified = -1
+    stable_hits = 0
+
+    target_sessions = max(1, int(getattr(cs, "session_count", 1)))
+    log.info("[%s] progress monitor: target=%d, min_packets=%d, require_appdata=%s",
+             session_id, target_sessions, min_packets, require_appdata)
+
+    while True:
+        if cs.done:
+            log.info("Monitoring session %d is DONE", session_id)
+            return  # capture already finished (stop event or duration elapsed)
+        else:
+            log.info("Monitoring session %d is NOT DONE yet", session_id)
+
+        time.sleep(poll_interval)
+
+        try:
+            # If file does not exist yet (very early), skip
+            if not os.path.exists(cs.outfile) or os.path.getsize(cs.outfile) == 0:
+                log.info("File does not exist yet for session %d (very early)", session_id)
+                continue
+
+            cand = _list_clienthello_streams()
+            log.info(f"Client Hellos detected: {len(cand)}")
+            qualified = 0
+            for sid in cand:
+                # Fast reject first: must have SH and enough packets
+                if not _has_serverhello(sid):
+                    log.debug("No Server Hello for session %d", sid)
+                    continue
+                pkt_cnt = _tcp_packet_count(sid)
+                if pkt_cnt < min_packets:
+                    continue
+                if require_appdata and not _has_appdata(sid):
+                    continue
+                qualified += 1
+
+            # stability check
+            logging.debug(f"Currently qualified: {qualified}")
+            log.info("[%s] monitor tick: qualified=%d / target=%d (cand=%d)",
+                     session_id, qualified, target_sessions, len(cand))
+
+            if qualified >= target_sessions:
+                stable_hits += 1
+            else:
+                stable_hits = 0
+
+            with _lock:
+                cs.qualified_streams = qualified
+                cs.last_progress_ts = time.time()
+                # only mark reached when we decide it's stable (you already track `stable_hits`)
+                cs.qualified_reached = (qualified >= target_sessions and stable_hits >= 2)
+
+            # require two consecutive polls at/over target to stop
+            if qualified >= target_sessions and stable_hits >= 2:
+                evt = _stop_events.get(session_id)
+                if evt and not evt.is_set():
+                    log.info("[%s] reached qualified=%d >= target=%d → stopping capture",
+                             session_id, qualified, target_sessions)
+                    evt.set()
+                    return
+
+            # log occasional progress
+            if qualified != last_qualified:
+                log.debug("[%s] qualified streams so far: %d (target=%d)", session_id, qualified, target_sessions)
+                last_qualified = qualified
+
+        except Exception as e:
+            # Do not kill the capture on monitor errors; keep trying
+            log.debug("[%s] progress monitor error: %s", session_id, e)
+
+
 
 
 @app.post("/start", response_model=StartResponseMulti)
@@ -481,6 +644,7 @@ def start_batch(request: StartBatchRequest):
             started_at=time.time(),
             duration_sec=target.duration_sec,
             session_count=getattr(target, "session_count", 1),
+            qualified_target=int(getattr(target, "session_count", 1)),
         )
 
         with _lock:
@@ -490,10 +654,12 @@ def start_batch(request: StartBatchRequest):
         # Start thread and wait until "armed"
         armed = Event()
         threading.Thread(target=_capture_job, args=(sid, target.duration_sec, timestamp, armed), daemon=True).start()
+        threading.Thread(target=_monitor_progress, args=(sid,), daemon=True).start()
         if not armed.wait(timeout=2.0):
             log.warning("Sniffer %s did not arm within 2s (iface=%s, outfile=%s)", sid, iface, outfile)
 
         children.append(asdict(cs))
+
 
     return StartResponseMulti(started=True, children=children)
 
@@ -525,6 +691,10 @@ def list_ifaces() -> List[str]:
 @app.get("/status", response_model=StatusAllResponse)
 def status():
     with _lock:
+        active = [sid for sid, cs in _sessions.items() if not cs.done]
+        log.info("/status → %d sessions (active=%s)", len(_sessions), active)
+        for sid, cs in _sessions.items():
+            log.info("  [%s] done=%s packets=%d error=%s", sid, cs.done, cs.packets, cs.error)
         return StatusAllResponse(
             sessions=[asdict(cs) for cs in _sessions.values()])
 
