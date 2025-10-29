@@ -1,12 +1,15 @@
-from flask import Flask, request, jsonify, Response, json
-import requests
+import json
 import logging
+import os
+import socket
 import time
-import os, socket
-from urllib.parse import urlparse
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Semaphore
-from collections import defaultdict
+from urllib.parse import urlparse
+
+import requests
+from flask import Flask, request, Response, json
 
 # one-at-a-time per backend key
 _backend_slots = defaultdict(lambda: Semaphore(1))
@@ -92,20 +95,15 @@ def choose_container(opsys: str, algo: str) -> str:
 
     return key
 
-
     """
     This function expects to get a JSON with a "jobs" field which contains
-    all the recording information for each container (os, browser, algo, seesions etc.)
+    all the recording information for each container (os, browser, algo, sessions etc.)
     A single json without jobs field is considered as a single recording
     """
 
 
 @app.route("/config", methods=["POST"])
-@app.route("/config", methods=["POST"])
 def config_handler():
-    import json, time
-    from flask import Response
-
     payload = request.get_json(silent=True) or {}
     logging.info("config_handler: received payload: %s", payload)
 
@@ -145,9 +143,9 @@ def config_handler():
     # ---------- parse & validate ----------
     jobs, errors = [], []
     for idx, j in enumerate(raw_jobs):
-        os_raw       = pick(j, "operationSystem", "os")
-        browser      = norm_browser(pick(j, "browser"))
-        algo_name    = norm_algo(pick(j, "algorithm", "algo"))
+        os_raw = pick(j, "operationSystem", "os")
+        browser = norm_browser(pick(j, "browser"))
+        algo_name = norm_algo(pick(j, "algorithm", "algo"))
         sessions_raw = pick(j, "sessions", "session", "count")
 
         logging.debug("job[%d] raw -> os=%r browser=%r algo=%r sessions=%r",
@@ -167,18 +165,22 @@ def config_handler():
 
         # validate
         if opsys not in {"linux", "windows", "macos"}:
-            errors.append({"index": idx, "error": "Invalid operating system"}); continue
+            errors.append({"index": idx, "error": "Invalid operating system"});
+            continue
         if browser not in {"chrome", "firefox"}:
-            errors.append({"index": idx, "error": "Invalid web browser"}); continue
+            errors.append({"index": idx, "error": "Invalid web browser"});
+            continue
         if algo_name not in {"kyber", "mlkem", "non-pqc"}:
-            errors.append({"index": idx, "error": "Invalid algorithm"}); continue
+            errors.append({"index": idx, "error": "Invalid algorithm"});
+            continue
         if sessions <= 0:
-            errors.append({"index": idx, "error": "Invalid sessions"}); continue
+            errors.append({"index": idx, "error": "Invalid sessions"});
+            continue
 
         try:
-            target_key  = choose_container(opsys, algo_name)
+            target_key = choose_container(opsys, algo_name)
             target_base = Containers[target_key].rstrip("/")
-            algo_code   = ALGO_NAME_TO_CODE[algo_name.lower()]  # int 0/1/2
+            algo_code = ALGO_NAME_TO_CODE[algo_name.lower()]  # int 0/1/2
         except Exception as e:
             errors.append({"index": idx, "error": str(e)})
             continue
@@ -187,9 +189,9 @@ def config_handler():
             "idx": idx,
             "opsys": opsys,
             "browser": browser,
-            "algo_name": algo_name,   # str ("kyber"/"mlkem"/"non-pqc")
-            "algo_code": algo_code,   # int (1/2/0)
-            "sessions": sessions,     # sniffer will manage N internally
+            "algo_name": algo_name,  # str ("kyber"/"mlkem"/"non-pqc")
+            "algo_code": algo_code,  # int (1/2/0)
+            "sessions": sessions,  # sniffer will manage N internally
             "target_key": target_key,
             "target_base": target_base
         })
@@ -224,7 +226,7 @@ def config_handler():
             backend_ip = _resolve_service_ip(jb["target_base"])
             logging.info("job[%d] backend ip resolved: %s", jb["idx"], backend_ip)
 
-            # 1) sniffer /start
+            # sniffer /start
             start_target = {
                 "os": jb["opsys"],
                 "browser": jb["browser"],
@@ -274,29 +276,30 @@ def config_handler():
             # tiny arm wait
             time.sleep(0.5)
 
-            # 2) backend /execute
+            # backend /execute
             exec_url = f'{jb["target_base"]}{TARGET_ENDPOINT}'
             exec_payload = {
                 "os": jb["opsys"],
                 "browser": jb["browser"],
                 "algorithm": jb["algo_code"],  # INT 0/1/2 expected by sender
-                "sessions": jb["sessions"],    # FYI for sender (sniffer owns looping now)
+                "sessions": jb["sessions"],  # FYI for sender (sniffer owns looping now)
             }
             backend_exec = {"status": None, "response": None}
             try:
                 logging.info("job[%d] backend /execute -> %s | payload=%s", jb["idx"], exec_url, exec_payload)
-                r = requests.post(exec_url, json=exec_payload, timeout=None) # wait max_wait time for results
-                backend_exec["status"] = r.status_code
+                single_request = requests.post(exec_url, json=exec_payload,
+                                               timeout=None)  # wait max_wait time for results
+                backend_exec["status"] = single_request.status_code
                 try:
-                    backend_exec["response"] = r.json()
+                    backend_exec["response"] = single_request.json()
                 except ValueError:
-                    backend_exec["response"] = {"text": r.text}
-                logging.info("job[%d] backend /execute returned %s", jb["idx"], r.status_code)
+                    backend_exec["response"] = {"text": single_request.text}
+                logging.info("job[%d] backend /execute returned %s", jb["idx"], single_request.status_code)
             except requests.RequestException as e:
                 logging.error("job[%d] backend unreachable: %s", jb["idx"], e)
                 backend_exec = {"status": 502, "response": {"error": f"backend unreachable: {e}"}}
 
-            # 3) POLL sniffer /status until THIS run's session_ids are done
+            # POLL sniffer /status until THIS run's session_ids are done
             def all_done(body_dict, ids):
                 if not ids:
                     return False
@@ -328,7 +331,7 @@ def config_handler():
 
                 time.sleep(poll_interval)
 
-            # 4) /done (sniffer) always called (idempotent), targeting THIS run
+            # /done (sniffer) always called (idempotent), targeting THIS run
             sn_done = {"status": None, "response": None}
             done_payload = {"container_ip": backend_ip}
             if child_ids:
@@ -369,7 +372,7 @@ def config_handler():
 
     # ---------- fan-out (serialized per-backend, parallel across backends) ----------
     results = [None] * len(raw_jobs)
-    futures = { _EXECUTOR.submit(run_one, jb): jb for jb in jobs }
+    futures = {_EXECUTOR.submit(run_one, jb): jb for jb in jobs}
     for fut in as_completed(futures):
         jb = futures[fut]
         try:
