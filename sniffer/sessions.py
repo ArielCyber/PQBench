@@ -18,7 +18,7 @@ class TargetSpec(BaseModel):
     container_ip: IPvAnyAddress
 
     # capture options (per-target)
-    duration_sec: int = Field(5, ge=1, le=3600)
+    duration_sec: int = Field(5, ge=1, le=10800) # limited to 3 hours of sniffing
     iface: Optional[str] = "pqbench0"
 
     # filter options (per-target)
@@ -52,6 +52,12 @@ class ChildSession:
     done: bool = False
     packets: int = 0
     error: Optional[str] = None
+
+    # NEW: progress telemetry updated by _monitor_progress
+    qualified_streams: int = 0  # how many streams meet CH+SH+min_packets(+appdata)
+    qualified_target: int = 0  # copy of session_count so we can expose it
+    qualified_reached: bool = False  # set True once we hit/stabilize target
+    last_progress_ts: Optional[float] = None
 
 class DoneRequest(BaseModel):
     container_ip: Optional[IPvAnyAddress] = None
