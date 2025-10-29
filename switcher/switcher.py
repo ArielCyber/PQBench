@@ -1,13 +1,15 @@
-from flask import Flask, request, jsonify, Response, json
-import requests
+import json
 import logging
+import os
+import socket
 import time
-import os, socket
-from urllib.parse import urlparse
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Semaphore
-from collections import defaultdict
-import json, time
+from urllib.parse import urlparse
+
+import requests
+from flask import Flask, request, json
 from flask import Response
 
 # one-at-a-time per backend key
@@ -94,7 +96,6 @@ def choose_container(opsys: str, algo: str) -> str:
 
     return key
 
-
     """
     This function expects to get a JSON with a "jobs" field which contains
     all the recording information for each container (os, browser, algo, seesions etc.)
@@ -104,7 +105,6 @@ def choose_container(opsys: str, algo: str) -> str:
 
 @app.route("/config", methods=["POST"])
 def config_handler():
-
     payload = request.get_json(silent=True) or {}
     logging.info("config_handler: received payload: %s", payload)
 
@@ -144,9 +144,9 @@ def config_handler():
     # ---------- parse & validate ----------
     jobs, errors = [], []
     for idx, j in enumerate(raw_jobs):
-        os_raw       = pick(j, "operationSystem", "os")
-        browser      = norm_browser(pick(j, "browser"))
-        algo_name    = norm_algo(pick(j, "algorithm", "algo"))
+        os_raw = pick(j, "operationSystem", "os")
+        browser = norm_browser(pick(j, "browser"))
+        algo_name = norm_algo(pick(j, "algorithm", "algo"))
         sessions_raw = pick(j, "sessions", "session", "count")
 
         logging.debug("job[%d] raw -> os=%r browser=%r algo=%r sessions=%r",
@@ -166,18 +166,22 @@ def config_handler():
 
         # validate
         if opsys not in {"linux", "windows", "macos"}:
-            errors.append({"index": idx, "error": "Invalid operating system"}); continue
+            errors.append({"index": idx, "error": "Invalid operating system"});
+            continue
         if browser not in {"chrome", "firefox"}:
-            errors.append({"index": idx, "error": "Invalid web browser"}); continue
+            errors.append({"index": idx, "error": "Invalid web browser"});
+            continue
         if algo_name not in {"kyber", "mlkem", "non-pqc"}:
-            errors.append({"index": idx, "error": "Invalid algorithm"}); continue
+            errors.append({"index": idx, "error": "Invalid algorithm"});
+            continue
         if sessions <= 0:
-            errors.append({"index": idx, "error": "Invalid sessions"}); continue
+            errors.append({"index": idx, "error": "Invalid sessions"});
+            continue
 
         try:
-            target_key  = choose_container(opsys, algo_name)
+            target_key = choose_container(opsys, algo_name)
             target_base = Containers[target_key].rstrip("/")
-            algo_code   = ALGO_NAME_TO_CODE[algo_name.lower()]  # int 0/1/2
+            algo_code = ALGO_NAME_TO_CODE[algo_name.lower()]  # int 0/1/2
         except Exception as e:
             errors.append({"index": idx, "error": str(e)})
             continue
@@ -186,9 +190,9 @@ def config_handler():
             "idx": idx,
             "opsys": opsys,
             "browser": browser,
-            "algo_name": algo_name,   # str ("kyber"/"mlkem"/"non-pqc")
-            "algo_code": algo_code,   # int (1/2/0)
-            "sessions": sessions,     # sniffer manages N internally
+            "algo_name": algo_name,  # str ("kyber"/"mlkem"/"non-pqc")
+            "algo_code": algo_code,  # int (1/2/0)
+            "sessions": sessions,  # sniffer manages N internally
             "target_key": target_key,
             "target_base": target_base
         })
@@ -211,10 +215,10 @@ def config_handler():
           4) in any case, call sniffer /done (idempotent) at the end, with all session_ids
         """
         poll_interval = float(os.getenv("SNIFFER_POLL_INTERVAL_SEC", "5"))  # seconds
-        per_session   = float(os.getenv("SNIFFER_WAIT_PER_SESSION", "30"))  # seconds per session
+        per_session = float(os.getenv("SNIFFER_WAIT_PER_SESSION", "30"))  # seconds per session
         # Hard cap (env) to avoid unbounded waits; default 3 hours
-        max_cap       = float(os.getenv("SNIFFER_MAX_WAIT_CAP", "10800"))
-        max_wait      = min(per_session * max(1, jb["sessions"]), max_cap)
+        max_cap = float(os.getenv("SNIFFER_MAX_WAIT_CAP", "10800"))
+        max_wait = min(per_session * max(1, jb["sessions"]), max_cap)
 
         if per_session * max(1, jb["sessions"]) > max_cap:
             logging.warning(
@@ -288,19 +292,19 @@ def config_handler():
                 "os": jb["opsys"],
                 "browser": jb["browser"],
                 "algorithm": jb["algo_code"],  # INT 0/1/2 expected by sender
-                "sessions": jb["sessions"],    # info for sender; sniffer owns counting
+                "sessions": jb["sessions"],  # info for sender; sniffer owns counting
             }
             backend_exec = {"status": None, "response": None}
             try:
                 logging.info("job[%d] backend /execute -> %s | payload=%s", jb["idx"], exec_url, exec_payload)
                 # Give sender a tad more than sniffer's max_wait
-                r = requests.post(exec_url, json=exec_payload, timeout=max_wait + 60)
-                backend_exec["status"] = r.status_code
+                single_request = requests.post(exec_url, json=exec_payload, timeout=max_wait + 60)
+                backend_exec["status"] = single_request.status_code
                 try:
-                    backend_exec["response"] = r.json()
+                    backend_exec["response"] = single_request.json()
                 except ValueError:
-                    backend_exec["response"] = {"text": r.text}
-                logging.info("job[%d] backend /execute returned %s", jb["idx"], r.status_code)
+                    backend_exec["response"] = {"text": single_request.text}
+                logging.info("job[%d] backend /execute returned %s", jb["idx"], single_request.status_code)
             except requests.RequestException as e:
                 logging.error("job[%d] backend unreachable: %s", jb["idx"], e)
                 backend_exec = {"status": 502, "response": {"error": f"backend unreachable: {e}"}}
@@ -427,7 +431,7 @@ def config_handler():
 
     # ---------- fan-out (serialized per-backend, parallel across backends) ----------
     results = [None] * len(raw_jobs)
-    futures = { _EXECUTOR.submit(run_one, jb): jb for jb in jobs }
+    futures = {_EXECUTOR.submit(run_one, jb): jb for jb in jobs}
     for fut in as_completed(futures):
         jb = futures[fut]
         try:
