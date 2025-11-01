@@ -19,17 +19,15 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=10)
 
 # Sniffer config (env-driven)
 SNIFFER_URL = os.getenv("SNIFFER_URL", "http://172.18.0.1:8080")
-SNIFFER_IFACE = os.getenv("SNIFFER_IFACE", None)  # e.g., "pqbench0" or None to let sniffer default
-SNIFFER_FILTER_MODE = os.getenv("SNIFFER_FILTER_MODE", "domain")  # "none" | "domain" | "custom"
-SNIFFER_DOMAIN = os.getenv("SNIFFER_DOMAIN", "pq.cloudflareresearch.com")
-SNIFFER_PORTS = os.getenv("SNIFFER_PORTS", None)  # e.g., "443,80"
-SNIFFER_DURATION_SEC_DEFAULT = int(os.getenv("SNIFFER_DURATION_SEC", "30"))
+SNIFFER_FILTER_MODE = "domain"
+SNIFFER_DOMAIN = "pq.cloudflareresearch.com"
 
 ALGO_NAME_TO_CODE = {"non-pqc": 0, "kyber": 1, "mlkem": 2}
 
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Set the minimum log level
+    level=getattr(logging, LOG_LEVEL, logging.DEBUG),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 
@@ -237,17 +235,15 @@ def config_handler():
             backend_ip = _resolve_service_ip(jb["target_base"])
             logging.info("job[%d] backend ip resolved: %s", jb["idx"], backend_ip)
 
-            # 1) sniffer /start
+            # sniffer /start
             start_target = {
                 "os": jb["opsys"],
                 "browser": jb["browser"],
                 "algo": jb["algo_code"],
                 "container_ip": backend_ip,
                 "duration_sec": max_wait,  # an upper bound; monitor should stop earlier
-                "iface": SNIFFER_IFACE,
                 "filter_mode": SNIFFER_FILTER_MODE,
-                "domain": SNIFFER_DOMAIN if SNIFFER_FILTER_MODE == "domain" else None,
-                "ports": SNIFFER_PORTS,
+                "domain": SNIFFER_DOMAIN,
                 "session_count": jb["sessions"],
             }
             # strip None fields

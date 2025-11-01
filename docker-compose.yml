@@ -15,12 +15,9 @@ services:
       URL_LINUX_MLKEM: "http://linux-mlkem:5000"
       URL_WIN_KYBER: "http://win-kyber:5000"
       URL_WIN_MLKEM: "http://win-mlkem:5000"
+      LOG_LEVEL: ${LOG_LEVEL}
       # add the rest when they are ready
-      # ... your existing URLs ...
-      SNIFFER_IFACE: "pqbench0"                # optional, matches your sniffer env
-      SNIFFER_FILTER_MODE: "domain"            # or "none"/"custom"
       SNIFFER_DOMAIN: "pq.cloudflareresearch.com"
-      SNIFFER_DURATION_SEC: "30"
 
     healthcheck:
       test: [ "CMD", "curl", "-fsS", "http://localhost:5000/health" ]
@@ -95,8 +92,7 @@ services:
       - NET_RAW
     restart: unless-stopped
     environment:
-      OUTPUT_ROOT: /output
-      LOG_LEVEL: DEBUG
+      LOG_LEVEL: ${LOG_LEVEL}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # to inspect/exec into other containers
       - ./output:/output

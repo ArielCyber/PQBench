@@ -20,7 +20,6 @@ class TargetSpec(BaseModel):
     # capture options (per-target)
     duration_sec: int = Field(5, ge=1, le=10800) # limited to 3 hours of sniffing
     iface: Optional[str] = "pqbench0"
-
     # filter options (per-target)
     filter_mode: Literal["none","domain","custom"] = "domain"
     domain: Optional[str] = "pq.cloudflareresearch.com"

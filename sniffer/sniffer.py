@@ -64,7 +64,7 @@ logging.basicConfig(
 log = logging.getLogger("pqbench.sniffer")
 
 # ---------- Config ----------
-OUTPUT_ROOT = os.environ.get("OUTPUT_ROOT", "../output")
+OUTPUT_ROOT = "/output"
 
 # ---------- State ----------
 _lock = threading.Lock()
