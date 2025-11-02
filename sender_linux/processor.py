@@ -237,7 +237,7 @@ def config_handler():
         # Catch anything else we didn’t anticipate
         app.logger.exception(e)
         logging.error(f"{e}")
-        return jsonify({'Error': 'Unexpected server error'}), 500
+        return jsonify({'Error': f'Unexpected server error: {e}'}), 500
 
 
 class BrowserLaunchError(RuntimeError):
