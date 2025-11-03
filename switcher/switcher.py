@@ -7,6 +7,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Semaphore
 from urllib.parse import urlparse
+from typing import Dict, List
 
 import requests
 from flask import Flask, request, json
