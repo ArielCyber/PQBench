@@ -221,7 +221,8 @@ def config_handler():
             max_wait = max_wait_cap
 
         stop_on_sender_done = os.getenv("SWITCHER_STOP_ON_SENDER_DONE", "true").lower() in {"1", "true", "yes"}
-        sender_done_grace = float(os.getenv("SENDER_DONE_GRACE_SEC", "2.0")) # to capture last ch/sh, maybe switch to sleep?
+        sender_done_grace = float(
+            os.getenv("SENDER_DONE_GRACE_SEC", "2.0"))  # to capture last ch/sh, maybe switch to sleep?
 
         logging.info("job[%d] routed_to=%s | wait plan: sessions=%d, per_session=%ss -> max_wait=%ss",
                      jb["idx"], jb["target_key"], jb["sessions"], per_session, max_wait)
@@ -493,6 +494,46 @@ def _resolve_service_ip(service_url: str) -> str:
     if not host:
         raise ValueError(f"Invalid service URL: {service_url}")
     return socket.gethostbyname(host)
+
+
+def _get_domains_by_attribute(attributes: List[str], base_url: str =
+"http://domain_maintainer:5010") -> Dict[str, List[str]]:
+    """
+    Fetches domains for a given list of attributes by making a GET request
+    to the domain_maintainer service.
+
+    Args:
+        attributes: A list of attributes (e.g., ['video', 'audio']).
+        base_url: The base URL of the domain_maintainer service.
+
+    Returns:
+        A dictionary where keys are attributes and values are the corresponding
+        lists of domains. Returns an empty dictionary if an error occurs.
+    """
+    if not attributes:
+        return {}
+
+    # The endpoint expects multiple 'attributes' query parameters
+    params = [("attributes", attr) for attr in attributes]
+    endpoint = f"{base_url}/get_domains/"
+
+    try:
+        # Send the GET request
+        response = requests.get(endpoint, params=params)
+
+        # Raise an exception for bad status codes (4xx or 5xx)
+        response.raise_for_status()
+
+        # The JSON response is already in the desired format
+        # e.g., {"video": ["youtube.com", ...], "news": ["cnn.com", ...]}
+        return response.json()
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching domains: {e}")
+        return {}
+    except ValueError:  # Catches JSON decoding errors
+        print("Error: Failed to decode JSON response from the server.")
+        return {}
 
 
 if __name__ == "__main__":
