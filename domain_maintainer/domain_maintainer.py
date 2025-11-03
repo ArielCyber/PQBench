@@ -64,7 +64,7 @@ def get_button_by_domain(domain: str, attribute: str, excel_file: str = 'domain_
         for row in sheet.iter_rows():
             # Check if the row has enough columns before accessing them
             if len(row) > 2 and row[2].value == domain:
-                return {"value_col_1": row[0].value, "value_col_2": row[1].value}
+                return {"shadow_class": row[0].value, "play_class": row[1].value}
 
         raise HTTPException(status_code=404, detail=f"Domain '{domain}' not found in attribute '{attribute}'")
     except FileNotFoundError:
@@ -74,7 +74,7 @@ def get_button_by_domain(domain: str, attribute: str, excel_file: str = 'domain_
 
 
 @app.get("/get_button_by_domain/")
-async def get_button(domain: str, attribute: str):
+async def get_button(domain: str, attribute: str) -> Dict[str, str]:
     """
     API endpoint to get values for a given domain from a specific attribute worksheet.
     """
