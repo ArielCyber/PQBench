@@ -10,6 +10,7 @@ services:
     # -t 0 = no gunicorn timeout kill
     ports: [ "5000:5000" ]
     environment:
+      # Be careful of changing the container names - the URLs are dependent on them
       SNIFFER_URL: "http://172.18.0.1:8080"
       URL_LINUX_KYBER: "http://linux-kyber:5000"
       URL_LINUX_MLKEM: "http://linux-mlkem:5000"
