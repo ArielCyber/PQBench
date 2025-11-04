@@ -10,7 +10,7 @@ from selenium.common import WebDriverException
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.support.wait import WebDriverWait
-from webdriver_manager.firefox import GeckoDriverManager
+# from webdriver_manager.firefox import GeckoDriverManager
 
 app = Flask(__name__)
 
@@ -104,7 +104,8 @@ def open_firefox(algo):
         logging.debug("Set PQC on")
 
     try:
-        gecko_path = GeckoDriverManager().install()
+        # gecko_path = GeckoDriverManager().install()
+        gecko_path = "/usr/local/bin/geckodriver"
         logging.debug("Installed GeckoDriverManager successfully!")
         return webdriver.Firefox(service=FirefoxService(gecko_path), options=firefox_opts, )
     except WebDriverException as e:

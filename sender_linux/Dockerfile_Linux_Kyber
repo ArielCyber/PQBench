@@ -8,18 +8,18 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Headless Chromium runtime deps (lean but enough for Selenium)
 RUN apt-get update && apt-get install -y --no-install-recommends \
       wget unzip ca-certificates \
-      # common chrome headless deps:
+      bzip2 xz-utils \
+      # common chrome/firefox headless deps:
       fonts-liberation libnss3 libxss1 libatk-bridge2.0-0 libatk1.0-0 \
       libdrm2 libxshmfence1 libgbm1 libxkbcommon0 libxcomposite1 \
       libxrandr2 libxdamage1 libasound2 libx11-xcb1 libx11-6 libgtk-3-0 \
+      libdbus-glib-1-2 libxt6 \
       # network tools you used
       tshark tcpdump \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------- Chromium 128 + Chromedriver 128 (Chrome for Testing) ----------
 ARG CFT_VER="128.0.6613.137"
-
-# Official CfT URLs (public, no auth)
 ARG CFT_CHROMIUM_URL="https://storage.googleapis.com/chrome-for-testing-public/${CFT_VER}/linux64/chrome-linux64.zip"
 ARG CFT_DRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/${CFT_VER}/linux64/chromedriver-linux64.zip"
 
@@ -36,26 +36,27 @@ RUN set -eux; \
     ln -sf /opt/chrome-linux64/chrome /usr/bin/chromium; \
     ln -sf /opt/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
 
-# Tell your code where to find them
 ENV CHROME_BIN=/usr/bin/chromium \
     CHROMEDRIVER_PATH=/usr/local/bin/chromedriver
 
-# --- Install Firefox 130.0.1 directly from Mozilla ---
+# ---------- Firefox (from Mozilla) ----------
 ARG FIREFOX_VERSION=130.0.1
 RUN set -eux; \
-  apt-get update && apt-get install -y --no-install-recommends \
-    wget ca-certificates \
-    bzip2 xz-utils \
-    libgtk-3-0 libdbus-glib-1-2 libxt6 libx11-xcb1 \
-    libnss3 libxss1 libxcomposite1 libxdamage1 libasound2 fonts-liberation \
-  && rm -rf /var/lib/apt/lists/* \
-  # download (redirects to a .tar.bz2 or .tar.xz)
-  && wget -O /tmp/firefox.tar "https://download.mozilla.org/?product=firefox-${FIREFOX_VERSION}&os=linux64&lang=en-US" \
+  wget -O /tmp/firefox.tar "https://download.mozilla.org/?product=firefox-${FIREFOX_VERSION}&os=linux64&lang=en-US" \
   && mkdir -p /opt \
-  # try bzip2 first, then xz if needed
   && ( tar -C /opt -xjf /tmp/firefox.tar || tar -C /opt -xJf /tmp/firefox.tar ) \
   && ln -sf /opt/firefox/firefox /usr/local/bin/firefox \
   && rm /tmp/firefox.tar
+
+# ---------- Geckodriver (PINNED, no runtime API calls) ----------
+ARG GECKODRIVER_VERSION=0.35.0
+RUN set -eux; \
+  wget -O /tmp/geckodriver.tar.gz \
+    "https://github.com/mozilla/geckodriver/releases/download/v${GECKODRIVER_VERSION}/geckodriver-v${GECKODRIVER_VERSION}-linux64.tar.gz"; \
+  tar -C /usr/local/bin -xzf /tmp/geckodriver.tar.gz; \
+  rm -f /tmp/geckodriver.tar.gz; \
+  chmod +x /usr/local/bin/geckodriver
+ENV GECKODRIVER_PATH=/usr/local/bin/geckodriver
 
 ENV MODE="KYBER"
 

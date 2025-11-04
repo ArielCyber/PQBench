@@ -205,7 +205,8 @@ def open_firefox(algo):
         logging.debug("Set PQC on")
 
     try:
-        gecko_path = GeckoDriverManager().install()
+        gecko_path = GeckoDriverManager().install() # add to cache
+        # gecko_path = "/usr/local/bin/geckodriver" # make dynamic once works
         logging.debug("Installed GeckoDriverManager successfully!")
         return webdriver.Firefox(service=FirefoxService(gecko_path), options=firefox_opts, )
     except WebDriverException as e:
