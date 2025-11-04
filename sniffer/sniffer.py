@@ -97,6 +97,16 @@ def _resolve_domain_ips(hostname: str) -> tuple[list[str], list[str]]:
     v4s: List[str] = []
     v6s: List[str] = []
     try:
+        # Ensure we have a clean hostname, not a URL
+        if "http" not in hostname:
+            hostname = "https://" + hostname
+        parsed_url = urlparse(hostname)
+        if parsed_url.hostname:
+            hostname = parsed_url.hostname
+        else:
+            # Fallback for cases where a raw domain is passed
+            hostname = parsed_url.path
+
         infos = socket.getaddrinfo(hostname, None)
         log.debug("_resolve_domain_ips(): getaddrinfo returned %d records", len(infos))
         for family, _, _, _, sockaddr in infos:
