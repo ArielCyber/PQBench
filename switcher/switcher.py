@@ -21,7 +21,7 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=10)
 # Sniffer config (env-driven)
 SNIFFER_URL = os.getenv("SNIFFER_URL", "http://172.18.0.1:8080")
 SNIFFER_FILTER_MODE = "domain"
-SNIFFER_DOMAIN = "pq.cloudflareresearch.com"
+SNIFFER_DOMAIN = "israelhayom.co.il/you-may-find-interesting/article/17184917"
 
 ALGO_NAME_TO_CODE = {"non-pqc": 0, "kyber": 1, "mlkem": 2}
 
