@@ -2,6 +2,7 @@ import pandas
 from fastapi import FastAPI, Query, HTTPException
 from typing import List, Dict
 import openpyxl
+from urllib.parse import urlparse
 
 app = FastAPI()
 
@@ -56,6 +57,15 @@ def get_button_by_domain(domain: str, attribute: str, excel_file: str = 'domain_
         or raises an HTTPException if the domain or attribute is not found.
     """
     try:
+        # Add a scheme if one is not present
+        if not domain.startswith(("http://", "https://")):
+            domain_with_scheme = "https://" + domain
+        else:
+            domain_with_scheme = domain
+
+        parsed_url = urlparse(domain_with_scheme)
+        hostname = parsed_url.hostname
+
         workbook = openpyxl.load_workbook(excel_file)
         if attribute not in workbook.sheetnames:
             raise HTTPException(status_code=404, detail=f"Attribute (worksheet) '{attribute}' not found")
@@ -63,10 +73,12 @@ def get_button_by_domain(domain: str, attribute: str, excel_file: str = 'domain_
         sheet = workbook[attribute]
         for row in sheet.iter_rows():
             # Check if the row has enough columns before accessing them
-            if len(row) > 2 and row[2].value == domain:
-                return {"shadow_class": row[0].value, "play_class": row[1].value}
+            if len(row) > 2 and row[2].value and hostname in row[2].value:
+                shadow_class = row[0].value or ""
+                play_class = row[1].value or ""
+                return {"shadow_class": shadow_class, "play_class": play_class}
 
-        raise HTTPException(status_code=404, detail=f"Domain '{domain}' not found in attribute '{attribute}'")
+        raise HTTPException(status_code=404, detail=f"Domain '{hostname}' not found in attribute '{attribute}'")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Excel file not found")
     except Exception as e:
