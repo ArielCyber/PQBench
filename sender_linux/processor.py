@@ -1,5 +1,8 @@
+import logging
 import os
 import sys
+import time
+from urllib.parse import urlparse
 
 from flask import Flask, request, jsonify
 from selenium import webdriver
@@ -7,7 +10,6 @@ from selenium.common import WebDriverException
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.support.wait import WebDriverWait
-from webdriver_manager.firefox import GeckoDriverManager
 
 from thousand_websites import *
 
@@ -17,6 +19,7 @@ logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)])
+
 
 @app.get("/health")
 def health():
@@ -173,8 +176,12 @@ def process_session(browser: str, algo: int, amount: int, domain: str, attribute
     dict
         JSON-serializable result with 'status'.
     """
-    attribute = 'video'
-    button_values = get_button_values(domain, attribute)
+    hostname = urlparse(f"https://{domain}").hostname
+    if not hostname:
+        logging.error(f"Could not parse hostname from domain: {domain}")
+        hostname = domain
+
+    button_values = get_button_values(hostname, attribute)
 
     shadow_button_class = ""
     play_button_class = ""
@@ -189,13 +196,18 @@ def process_session(browser: str, algo: int, amount: int, domain: str, attribute
         logging.debug(f"The driver opened: {driver}")
         driver.get(f'https://{domain}')
         logging.debug(f"The driver opened the given domain")
+        time.sleep(1)
 
-        if shadow_button_class or not shadow_button_class == "":
+        if shadow_button_class:
             click_shadow_button(shadow_button_class, driver)
-        if play_button_class or not play_button_class == "":
+            time.sleep(1)
+        if play_button_class:
             click_play_button(play_button_class, driver)
+            time.sleep(1)
 
+        time.sleep(3)
         played = play_video(driver)
+
         if not played:
             driver.switch_to.default_content()
             find_and_play_in_iframes(driver, play_button_class)
