@@ -487,7 +487,7 @@ def _create_output_directories(code: str, timestamp: str, ip: str, domain: str) 
     """
     Creates output directories and returns the child directory and output file path.
     """
-    clean_domain = domain.replace("https://", "").replace("www.", "")
+    clean_domain = urlparse(domain).netloc or urlparse(domain).path
     safe_domain = clean_domain.replace('/', '_')
     child_dir = os.path.join(OUTPUT_ROOT, code, f"session-{timestamp}_{safe_domain}")
     os.makedirs(child_dir, exist_ok=True)
