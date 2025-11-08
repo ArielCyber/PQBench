@@ -176,7 +176,12 @@ def process_session(browser: str, algo: int, amount: int, domain: str, attribute
     dict
         JSON-serializable result with 'status'.
     """
-    hostname = urlparse(f"https://{domain}").hostname
+    if "http" not in domain:
+        logging.debug(f"Adding https:// to {domain} to url")
+        hostname = urlparse(f"https://{domain}").hostname
+    else:
+        hostname = urlparse(f"{domain}").hostname
+
     if not hostname:
         logging.error(f"Could not parse hostname from domain: {domain}")
         hostname = domain
@@ -194,7 +199,7 @@ def process_session(browser: str, algo: int, amount: int, domain: str, attribute
     for i in range(amount):
         driver = open_browser(browser, algo)
         logging.debug(f"The driver opened: {driver}")
-        driver.get(f'https://{domain}')
+        driver.get(f'{domain}')
         logging.debug(f"The driver opened the given domain")
         time.sleep(1)
 
@@ -247,7 +252,9 @@ def config_handler():
         amount = int(data['sessions'])
         logging.debug(f"Amount: {amount}")
         domain = data.get('domain', 'israelhayom.co.il/you-may-find-interesting/article/17184917')
+        logging.debug(f"Domain: {domain}")
         attribute = data.get('attribute')
+        logging.debug(f"Attribute: {attribute}")
     except (KeyError, ValueError) as e:
         logging.error(f"Bad request: {e}")
         return jsonify({'Error': f'Bad request: {e}'}), 400

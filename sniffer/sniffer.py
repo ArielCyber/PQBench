@@ -483,11 +483,13 @@ def _validate_interface(iface: str) -> None:
             raise HTTPException(status_code=400, detail=f"iface '{iface}' not found; available={sorted(visible)}")
 
 
-def _create_output_directories(code: str, timestamp: str, ip: str) -> tuple[str, str]:
+def _create_output_directories(code: str, timestamp: str, ip: str, domain: str) -> tuple[str, str]:
     """
     Creates output directories and returns the child directory and output file path.
     """
-    child_dir = os.path.join(OUTPUT_ROOT, code, f"session-{timestamp}")
+    clean_domain = domain.replace("https://", "").replace("www.", "")
+    safe_domain = clean_domain.replace('/', '_')
+    child_dir = os.path.join(OUTPUT_ROOT, code, f"session-{timestamp}_{safe_domain}")
     os.makedirs(child_dir, exist_ok=True)
     safe_ip = ip.replace(":", "_")
     outfile = os.path.join(child_dir, f"raw-{safe_ip}.pcap")
@@ -496,24 +498,12 @@ def _create_output_directories(code: str, timestamp: str, ip: str) -> tuple[str,
 
 def _build_bpf_filter(target, ip: str) -> str:
     """
-    Builds the BPF filter string based on the target's filter mode.
+    Builds the BPF filter string to capture all IPv4 traffic.
+    The 'target' and 'ip' parameters are ignored for this filter mode.
     """
-    if target.filter_mode == "none":
-        bpf = f"(host {ip}) and (ip or ip6)"
-    elif target.filter_mode == "domain":
-        if not target.domain:
-            raise HTTPException(status_code=400, detail="domain required when filter_mode=domain")
-        v4s, v6s = _resolve_domain_ips(target.domain)
-        if not (v4s or v6s):
-            raise HTTPException(status_code=424, detail=f"No A/AAAA records resolved for {target.domain}")
-        bpf = _build_domain_bpf(ip, v4s, v6s)
-    elif target.filter_mode == "custom":
-        if not target.custom_bpf:
-            raise HTTPException(status_code=400, detail="custom_bpf required when filter_mode=custom")
-        bpf = f"(host {ip}) and ({target.custom_bpf})"
-    else:
-        raise HTTPException(status_code=400, detail="unknown filter_mode")
-    return _and_ports(bpf, target.ports)
+    bpf = "ip"
+    log.debug(f"Building BPF filter: {bpf} (capturing all IPv4 traffic)")
+    return bpf
 
 
 def _register_and_start_session(sid: str, cs: ChildSession, duration: int, timestamp: str) -> None:
@@ -547,7 +537,7 @@ def _start_single_target(target, timestamp: str, seen: set) -> dict | None:
     iface = str(target.iface) or "any"
     _validate_interface(iface)
 
-    child_dir, outfile = _create_output_directories(code, timestamp, ip)
+    child_dir, outfile = _create_output_directories(code, timestamp, ip, target.domain)
     bpf = _build_bpf_filter(target, ip)
 
     # Register session

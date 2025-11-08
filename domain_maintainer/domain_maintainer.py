@@ -1,13 +1,13 @@
 import pandas
 from fastapi import FastAPI, Query, HTTPException
-from typing import List, Dict
+from typing import List, Dict, Union
 import openpyxl
 from urllib.parse import urlparse
 
 app = FastAPI()
 
 
-def get_domains_by_attribute(attributes: List[str], excel_file: str = 'domain_data.xlsx') -> dict:
+def get_domains_by_attribute(attributes: List[str], excel_file: str = 'domain_data.xlsx') -> Dict[str, Union[List[str], str]]:
     """
     Reads domain data from an Excel file based on a list of attributes.
 
@@ -16,7 +16,15 @@ def get_domains_by_attribute(attributes: List[str], excel_file: str = 'domain_da
         excel_file: The path to the Excel file.
 
     Returns:
-        A dictionary where keys are attributes and values are lists of domain names.
+        A dictionary where each key is an attribute from the input list.
+        The corresponding value is either a list of domain strings found in the
+        sheet or an error string if the sheet could not be read.
+        Example:
+        {
+            "video": ["youtube.com", "vimeo.com"],
+            "news": ["cnn.com", "bbc.com"],
+            "invalid_attr": "Error reading sheet: Sheet 'invalid_attr' not found"
+        }
     """
     all_domains = {}
 
@@ -35,9 +43,18 @@ def get_domains_by_attribute(attributes: List[str], excel_file: str = 'domain_da
 
 
 @app.get("/get_domains/")
-async def get_domains(attributes: List[str] = Query(...)):
+async def get_domains(attributes: List[str] = Query(...)) -> Dict[str, Union[List[str], str]]:
     """
     API endpoint to get domains for a list of attributes.
+
+    Returns:
+        A JSON object where keys are attributes and values are either a list of
+        domain strings or an error message.
+        Example:
+        {
+            "video": ["youtube.com", "vimeo.com"],
+            "news": ["cnn.com", "bbc.com"]
+        }
     """
     return get_domains_by_attribute(attributes)
 
