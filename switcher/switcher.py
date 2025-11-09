@@ -38,8 +38,8 @@ Containers = {
     "linux_kyber": os.getenv("URL_LINUX_KYBER", "http://linux-kyber:5000"),
     "linux_mlkem": os.getenv("URL_LINUX_MLKEM", "http://linux-mlkem:5000"),
 
-    "windows_kyber": os.getenv("URL_WINDOWS_KYBER", "http://windows-kyber:5000"),
-    "windows_mlkem": os.getenv("URL_WINDOWS_MLKEM", "http://windows-mlkem:5000"),
+    "windows_kyber": os.getenv("URL_WINDOWS_KYBER", "http://win-kyber:5000"),
+    "windows_mlkem": os.getenv("URL_WINDOWS_MLKEM", "http://win-mlkem:5000"),
 
     "macos_kyber": os.getenv("URL_MACOS_KYBER", "http://macos-kyber:5000"),
     "macos_mlkem": os.getenv("URL_MACOS_MLKEM", "http://macos-mlkem:5000"),
@@ -292,7 +292,11 @@ def config_handler():
                 try:
                     backend_exec["response"] = r.json()
                 except ValueError:
+                    logging.debug("Could not reach the /execute")
                     backend_exec["response"] = {"text": r.text}
+                    return Response(json.dumps(r, indent=2, ensure_ascii=False),
+                                    status=500, mimetype="application/json")
+
                 logging.info("job[%d] backend /execute returned %s", jb["idx"], r.status_code)
 
                 # ---- NEW: Stop-on-sender-done path ----
@@ -442,7 +446,7 @@ def config_handler():
 
     body = {
         "backends": results,
-        "note": "One sniffer /start per job (session_count=N). Early-stop when qualified_reached=true → call /done; otherwise poll until done or timeout."
+        "note": "One sniffer /start per job (session_count=N). Early-stop when sender container finished sending requests or timeout."
     }
 
     pretty = json.dumps(body, indent=2, ensure_ascii=False)
