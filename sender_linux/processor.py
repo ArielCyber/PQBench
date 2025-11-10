@@ -7,9 +7,11 @@ from urllib.parse import urlparse
 from flask import Flask, request, jsonify
 from selenium import webdriver
 from selenium.common import WebDriverException
+from selenium.webdriver import ActionChains
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.support.wait import WebDriverWait
+from webdriver_manager.firefox import GeckoDriverManager
 
 from thousand_websites import *
 
@@ -207,7 +209,7 @@ def process_session(browser: str, algo: int, amount: int, domain: str, attribute
             click_shadow_button(shadow_button_class, driver)
             time.sleep(1)
         if play_button_class:
-            click_play_button(play_button_class, driver)
+            click_play_button(driver, play_button_class)
             time.sleep(1)
 
         time.sleep(3)
@@ -279,6 +281,97 @@ def config_handler():
 class BrowserLaunchError(RuntimeError):
     """Raised when we fail to launch the requested browser."""
     pass
+
+wait_time = 10
+
+def general_interaction(driver, shadow_button_class):
+    if shadow_button_class:
+        click_shadow_button(driver=driver, shadow_class=shadow_button_class)
+        time.sleep(1)
+
+def video_website(driver, play_button_class, shadow_button_class):
+    general_interaction(driver, shadow_button_class)
+
+    if play_button_class:
+        click_play_button(driver, play_button_class)
+        time.sleep(3)
+
+    played = play_video(driver)
+
+    if not played:
+        driver.switch_to.default_content()
+        find_and_play_in_iframes(driver, play_button_class)
+
+def map_website(driver, play_button_class, shadow_button_class):
+    general_interaction(driver, shadow_button_class)
+
+    if play_button_class:
+        find_and_play_in_iframes(driver, play_button_class)
+
+    if play_button_class:
+        try_iframes(driver, play_button_class)
+
+    go_to_location(driver)
+    width = driver.execute_script("return window.innerWidth;")
+    height = driver.execute_script("return window.innerHeight;")
+    cx = int(width / 2)
+    cy = int(height / 2)
+
+    driver.execute_script("""
+                const el = document.elementFromPoint(arguments[0], arguments[1]);
+                if (el) el.scr
+                ollIntoView({behavior: 'instant', block: 'center', inline: 'center'});
+            """, cx, cy)
+
+    ActionChains(driver).move_by_offset(0, 0).move_by_offset(cx, cy).click().perform()
+    ActionChains(driver).move_by_offset(-cx, -cy).perform()  # Click focus
+    t0 = time.time()
+    while time.time() - t0 < wait_time:
+        ActionChains(driver).move_by_offset(cx, cy).click_and_hold().move_by_offset(180, 10).release().perform()
+        ActionChains(driver).move_by_offset(-cx - 180, -cy - 10).perform()  # Pan right
+        time.sleep(0.3)
+        ActionChains(driver).move_by_offset(cx, cy).click_and_hold().move_by_offset(-160, -15).release().perform()
+        ActionChains(driver).move_by_offset(-cx + 160, -cy + 15).perform()  # Pan left
+        time.sleep(0.3)
+        driver.execute_script("""  
+                    const e1 = new WheelEvent('wheel', {deltaY: -220});
+                    const e2 = new WheelEvent('wheel', {deltaY:  220});
+                    const el = document.elementFromPoint(arguments[0], arguments[1]);
+                    el.dispatchEvent(e1);
+                    el.dispatchEvent(e2);
+                """, cx, cy)  # ZOOM IN/OUT
+        time.sleep(0.3)
+    driver.quit()
+
+
+def game_website(driver, play_button_class, shadow_button_class, skip_class):
+    general_interaction(driver, shadow_button_class)
+    fill_nickname_field(driver, False)
+    enter_focused(driver, play_button_class)
+
+    if play_button_class:
+        click_play_button(driver, play_button_class)
+
+    time.sleep(5)
+
+    if play_button_class:
+        try_iframes(driver, play_button_class)
+        try_iframes_in_iframe(driver, play_button_class)
+    else:
+        if skip_class and isinstance(skip_class, int):
+            time.sleep(skip_class)
+        time.sleep(wait_time)
+    driver.quit()
+
+def download_website():
+
+def cloud_website():
+
+def browser_website():
+
+def audio_website():
+
+def rtt_website():
 
 
 if __name__ == '__main__':

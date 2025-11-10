@@ -5,6 +5,7 @@ from typing import Dict, Optional
 
 import requests
 from selenium.common import NoSuchElementException
+from selenium.webdriver import Keys
 from selenium.webdriver.common.by import By
 
 CLASS_INDEX_RE = re.compile(r'^(?P<class>[A-Za-z0-9_\-.:]+)\\[(?P<idx>\\d+)\\]$')
@@ -43,7 +44,7 @@ def click_shadow_button(shadow_class, driver):
         logging.error("No shadow DOM found")
 
 
-def click_play_button(play_class, driver, tries=0):
+def click_play_button(driver, play_class, tries=0):
     logging.debug("############# click_play_button ############  ")
     time.sleep(2)
     groups = [name.strip() for name in play_class.split(",") if name.strip()]
@@ -97,7 +98,7 @@ def click_play_button(play_class, driver, tries=0):
         if tries > 0:
             logging.error(f"Unloaded '{play_class}'")
             return False
-        click_play_button(play_class, driver, tries)
+        click_play_button(driver, play_class, tries)
     for curNameDone in name_done:
         if curNameDone:
             return True
@@ -189,7 +190,7 @@ def find_and_play_in_iframes(driver, play_class):
             if play_video(driver):
                 return True
 
-            if play_class and click_play_button(play_class, driver):
+            if play_class and click_play_button(driver, play_class):
                 time.sleep(2)
                 if play_video(driver):
                     return True
@@ -205,3 +206,101 @@ def find_and_play_in_iframes(driver, play_class):
             continue
 
     return False
+
+def try_iframes_in_iframe(driver, play_class_button):
+    try:
+        print(f"############# iframe in iframe #############  ", end='')
+        driver.switch_to.default_content()
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        for iframe in iframes:
+            driver.switch_to.frame(iframe)
+            iframes2 = driver.find_elements(By.TAG_NAME, "iframe")
+            for iframe2 in iframes2:
+                if handle_iframe(driver, iframe2, play_class_button):
+                    return True
+        return False
+    except Exception as e:
+        return False
+
+def handle_iframe(driver, iframe, play_class_button):
+    try:
+        driver.switch_to.frame(iframe)
+        time.sleep(2)
+        clicked = click_play_button(driver, play_class_button)
+        if clicked and not click_outof_iframe(driver, play_class_button):
+            try_iframes(driver, play_class_button)
+        time.sleep(2)
+        if clicked and play_video(driver):
+            driver.switch_to.default_content()
+            return True
+        driver.switch_to.default_content()
+    except:
+        driver.switch_to.default_content()
+    return False
+
+def click_outof_iframe(driver, play_class_button):
+    if not play_class_button:
+        return True
+    driver.switch_to.default_content()
+    clicked = click_play_button(driver, play_class_button)
+    time.sleep(2)
+    play_video(driver)
+    return clicked
+
+def try_iframes(driver, play_class_button):
+    print(f"################## iframe ##################  ", end='')
+    driver.switch_to.default_content()
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    for iframe in iframes:
+        if handle_iframe(driver, iframe, play_class_button):
+            return True
+
+def go_to_location(driver):
+    try:
+        origin = driver.execute_script("return location.origin")
+        driver.execute_cdp_cmd("Browser.grantPermissions", {
+            "origin": origin,
+            "permissions": ["geolocation"]
+        })
+        driver.execute_script("""
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(()=>{}, ()=>{});
+            }
+        """)
+    except Exception as e:
+        print(f"[W] Geolocation grant failed: {e}")
+
+def fill_nickname_field(driver, nicknamed_filled, value="sinale"):
+    if nicknamed_filled:
+        return
+    print("############ fill_nickname_field ###########  ", end='')
+    inputs = driver.find_elements(By.TAG_NAME, "input")
+    keywords = ["name", "nickname", "displayname"]
+    for input_el in inputs:
+        try:
+            attrs = {
+                "name": input_el.get_attribute("name") or "",
+                "id": input_el.get_attribute("id") or "",
+                "placeholder": input_el.get_attribute("placeholder") or ""
+            }
+            for attr_value in attrs.values():
+                if any(k in attr_value.lower() for k in keywords):
+                    input_el.clear()
+                    input_el.send_keys(value)
+                    print(f"[V]")
+                    nicknamed_filled = True
+                    return
+        except Exception as e:
+            continue
+    print("[X]")
+    return False
+
+def enter_focused(driver, play_class_button):
+    if not play_class_button:
+        print("################# enter_focused ################  ", end='')
+        try:
+            focused = driver.switch_to.active_element
+            focused.send_keys(Keys.ENTER)
+            print("[V]")
+        except Exception as e:
+            print("[X]:", e)
