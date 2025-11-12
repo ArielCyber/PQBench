@@ -3,18 +3,18 @@ import os
 import json
 from unittest.mock import patch, MagicMock, call
 
-# Import the Flask app and functions from your processor.py file
-# We assume the file is named 'processor.py'
+# Import the Flask app and functions from your main.py file
+# We assume the file is named 'main.py'
 try:
-    from processor import app, process_session, open_browser, open_firefox, open_chrome, BrowserLaunchError
+    from main import app, process_session, open_browser, open_firefox, open_chrome, BrowserLaunchError
 except ImportError:
-    print("Error: Make sure your processor.py file is in the same directory.")
+    print("Error: Make sure your main.py file is in the same directory.")
     exit(1)
 
 
 class TestProcessorApp(unittest.TestCase):
     """
-    Test suite for the processor.py Flask application and helper functions.
+    Test suite for the main.py Flask application and helper functions.
     """
 
     def setUp(self):
