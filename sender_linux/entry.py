@@ -4,8 +4,8 @@ import sys
 
 from flask import Flask, request, jsonify
 
-from exceptions import *
-from attributes import VideoSender
+from browser_manager import BrowserLaunchError
+from attributes.video_sender import VideoSender
 
 app = Flask(__name__)
 
