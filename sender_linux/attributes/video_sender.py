@@ -10,7 +10,7 @@ class VideoSender(Sender):
     Generates web traffic that simulates watching a video.
     """
 
-    def __init__(self, browser: str, algo: int, sessions: int, website_url: str, wait_time=10):
+    def __init__(self, browser: str, algo: int, sessions: int, website_url: str, wait_time: int = None):
         # We pass "Video" as the attribute, which is used by the
         # ConfigService to fetch the correct button names.
         super().__init__(
@@ -34,21 +34,24 @@ class VideoSender(Sender):
         shadow_button = button_data.get("shadow_button")
         play_button = button_data.get("play_button")
 
-        # 1. Delegate shadow button click
+        # Delegate shadow button click
         interactor.click_shadow_button_advanced(shadow_button)
 
-        # 2. Delegate main play button click
+        # Delegate main play button click
         self.logger.info("Attempting to click main play button...")
         play_clicked = interactor.click_button_advanced(play_button)
 
-        # 3. Delegate iframe search if needed
+        # Delegate iframe search if needed
         if not play_clicked:
             self.logger.info("Main play button not found, searching iframes...")
             interactor.try_iframes(play_button)
         else:
             self.logger.info("Main play button clicked successfully.")
 
-        # 4. Simulate watch time
+        self.logger.info("Attempting to force-play media as a fallback...")
+        interactor.force_play_media(play_button)
+
+        # Simulate watch time
         watch_duration = 30
         self.logger.info(f"Simulating video watch time for {watch_duration} seconds...")
         time.sleep(watch_duration)

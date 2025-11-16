@@ -36,6 +36,12 @@ services:
     build:
       context: ./sender_linux
       dockerfile: Dockerfile_Linux_Kyber
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
+      DEFAULT_WAIT_TIME: ${DEFAULT_WAIT_TIME}
+      VIDEO_WAIT_TIME: ${VIDEO_WAIT_TIME}
+      DOWNLOAD_WAIT_TIME: ${DOWNLOAD_WAIT_TIME}
+      CONFIG_SERVICE_URL: ${CONFIG_SERVICE_URL}
     container_name: linux-kyber
     restart: unless-stopped
     ports:
@@ -58,6 +64,12 @@ services:
       context: ./sender_linux
       dockerfile: Dockerfile_Linux_MLKEM
     container_name: linux-mlkem
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
+      DEFAULT_WAIT_TIME: ${DEFAULT_WAIT_TIME}
+      VIDEO_WAIT_TIME: ${VIDEO_WAIT_TIME}
+      DOWNLOAD_WAIT_TIME: ${DOWNLOAD_WAIT_TIME}
+      CONFIG_SERVICE_URL: ${CONFIG_SERVICE_URL}
     restart: unless-stopped
     ports:
       - "5002:5000"

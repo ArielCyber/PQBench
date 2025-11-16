@@ -2,6 +2,8 @@ import logging
 import requests
 import tldextract
 from typing import Dict, Optional
+import backoff
+import os
 
 
 class ConfigService:
@@ -10,10 +12,15 @@ class ConfigService:
     Its single responsibility is external data retrieval.
     """
 
-    def __init__(self, base_url: str = "http://domain_maintainer:5010"):
-        self.base_url = base_url
+    def __init__(self, base_url: str = None):
+        # Read from env var, with a fallback for convenience
+        self.base_url = base_url if base_url else os.environ.get("CONFIG_SERVICE_URL", "http://domain_maintainer:5010")
         self.logger = logging.getLogger(self.__class__.__name__)
 
+    # This decorator will automatically retry the function
+    # 3 times, with a 5-second wait, if it fails
+    @backoff.on_exception(backoff.expo, (requests.exceptions.RequestException,
+                                         requests.exceptions.HTTPError), max_tries=3, max_time=60)
     def get_button_values(self, website_url: str, attribute: str) -> Optional[Dict[str, str]]:
         """Fetches button values from the external service using tldextract."""
         if not website_url or not attribute:
