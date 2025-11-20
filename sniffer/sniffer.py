@@ -169,21 +169,25 @@ def name_dir(os_name: str, browser: str, algo: int) -> str:
     Raises:
         ValueError: If an unsupported OS or browser label is provided.
     """
-    os_map = {"linux": "1", "windows": "2", "macos": "3"}
-    browser_map = {"firefox": "1", "chrome": "2"}
 
-    os_num = os_map.get(os_name.lower())
-    if not os_num:
+    os_name = os_name.lower()
+    if os_name != "linux" and os_name != "windows" and os_name != "macos":
         log.error(f"name_dir invalid os: {os_name}")
         raise ValueError(f"Invalid input: {os_name}")
 
-    browser_num = browser_map.get(browser.lower())
-    if not browser_num:
+    browser = browser.lower()
+    if browser != "firefox" and browser != "chrome":
         log.error(f"name_dir invalid browser: {browser}")
         raise ValueError(f"Invalid input: {browser}")
 
-    code = f"{os_num}{browser_num}{algo}"
-    log.debug(f"name_dir -> os={os_name} browser={browser} algo={algo} => {code}")
+    algo_map = {0: "non-pqc", 1: "kyber", 2: "mlkem"}
+    algo_name = algo_map.get(algo)
+    if algo_name is None:
+        log.error(f"name_dir invalid algo: {algo}")
+        raise ValueError(f"Invalid input: {algo}")
+
+    code = f"{os_name}_{browser}_{algo_name}"
+    log.debug(f"name_dir -> os={os_name} browser={browser} algo={algo_name} => {code}")
     return code
 
 
@@ -431,7 +435,7 @@ def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | N
         if child_session.packets > 0:
             _split_streams_tshark(
                 input_pcap=child_session.outfile,
-                output_dir=os.path.join(child_session.child_dir, "streams"),
+                output_dir=child_session.child_dir,
                 dir_code=child_session.code,
                 timestamp=timestamp,
                 min_packets=30,
@@ -479,8 +483,7 @@ def _create_output_directories(code: str, timestamp: str, ip: str) -> tuple[str,
     """
     child_dir = os.path.join(OUTPUT_ROOT, code, f"session-{timestamp}")
     os.makedirs(child_dir, exist_ok=True)
-    safe_ip = ip.replace(":", "_")
-    outfile = os.path.join(child_dir, f"raw-{safe_ip}.pcap")
+    outfile = os.path.join(child_dir, f"raw.pcap")
     return child_dir, outfile
 
 
