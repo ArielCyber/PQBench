@@ -1,21 +1,25 @@
-# Dockerfile (agent)
-FROM python:3.11-slim
+# Dockerfile (agent) - SERVER VERSION
+FROM mirror.gcr.io/library/python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
 
 # Install Python deps
 COPY requirements.txt .
+# Make sure gunicorn is in requirements.txt (see next step)
 RUN pip install -r requirements.txt
 
 # Copy code
-# (Assuming your script is named agent.py)
 COPY agent.py /app/agent.py
 
-# Simple loop that calls the agent periodically
-# INTERVAL_SEC can be overridden via env in compose
-RUN printf '#!/usr/bin/env sh\nset -eu\n: ${INTERVAL_SEC:=60}\nwhile true; do\n  echo "[agent-worker] sending config...";\n  python /app/agent.py || true;\n  sleep "$INTERVAL_SEC";\ndone\n' > /app/entrypoint-worker.sh \
- && chmod +x /app/entrypoint-worker.sh
+# --- DELETED ---
+# The old 'RUN printf...' and 'CMD' are gone.
+# We are no longer running a loop.
+# --- DELETED ---
 
-# No ports, no healthcheck in the image
-CMD ["/app/entrypoint-worker.sh"]
+# The Agent is now a server, so it needs to expose its port
+EXPOSE 5000
+
+# Run the gunicorn server (same as the switcher)
+# This command runs the 'app' variable inside the 'agent.py' file.
+CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5000", "agent:app"]
