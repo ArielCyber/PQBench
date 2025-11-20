@@ -1,3 +1,8 @@
+from sender import Sender
+from page_interactor import PageInteractor
+import time
+
+
 class BrowserSender(Sender):
     """
     Generates Browsing traffic by scrolling and clicking internal links.

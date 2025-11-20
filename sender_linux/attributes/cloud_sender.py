@@ -1,3 +1,8 @@
+from sender import Sender
+from page_interactor import PageInteractor
+import time
+
+
 class CloudSender(Sender):
     """
     Generates Cloud traffic by simulating a file upload.

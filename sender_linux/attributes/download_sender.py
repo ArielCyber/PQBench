@@ -1,3 +1,8 @@
+from sender import Sender
+from page_interactor import PageInteractor
+import time
+
+
 class DownloadSender(Sender):
     """
     Generates Download traffic by clicking a download button

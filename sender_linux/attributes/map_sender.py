@@ -1,3 +1,7 @@
+from sender import Sender
+from page_interactor import PageInteractor
+
+
 class MapSender(Sender):
     """
     Generates Map traffic by panning and zooming on the page.

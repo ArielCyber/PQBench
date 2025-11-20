@@ -6,6 +6,13 @@ from flask import Flask, request, jsonify
 
 from browser_manager import BrowserLaunchError
 from attributes.video_sender import VideoSender
+from attributes.rtt_sender import RTTSender
+from attributes.map_sender import MapSender
+from attributes.game_sender import GameSender
+from attributes.download_sender import DownloadSender
+from attributes.cloud_sender import CloudSender
+from attributes.browser_sender import BrowserSender
+from attributes.audio_sender import AudioSender
 
 app = Flask(__name__)
 
@@ -79,9 +86,27 @@ def config_handler():
         return jsonify('Error: session count must be a positive number')
 
     try:
+
         if attribute.lower() == "video":
             sender = VideoSender(browser, algo, amount, domain)
-        sender = VideoSender(browser, algo, amount, domain)
+        elif attribute.lower() == "rtt":
+            sender = RTTSender(browser, algo, amount, domain)
+        elif attribute.lower() == "map":
+            sender = MapSender(browser, algo, amount, domain)
+        elif attribute.lower() == "game":
+            sender = GameSender(browser, algo, amount, domain)
+        elif attribute.lower() == "download":
+            sender = DownloadSender(browser, algo, amount, domain)
+        elif attribute.lower() == "cloud":
+            sender = CloudSender(browser, algo, amount, domain)
+        elif attribute.lower() == "browsing":
+            sender = BrowserSender(browser, algo, amount, domain)
+        elif attribute.lower() == "audio":
+            sender = AudioSender(browser, algo, amount, domain)
+        else:  # Default
+            logging.error(f"Unknown attribute: {attribute}")
+            sender = VideoSender(browser, algo, amount, domain)
+
         sender.run()
         return "done", 200
     except BrowserLaunchError as e:

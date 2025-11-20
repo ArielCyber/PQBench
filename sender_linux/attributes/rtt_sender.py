@@ -1,3 +1,7 @@
+from sender import Sender
+from page_interactor import PageInteractor
+
+
 class RTTSender(Sender):
     """
     Generates RTT (Real-Time Ticker/Text) traffic by continuously
