@@ -36,7 +36,7 @@ def send_config_to_switcher(config_from_bar):
     logging.info(f"Forwarding config to switcher:")
     logging.debug(json.dumps(config_from_bar, indent=2))
 
-    save_config_to_file(config_from_bar)  # Still useful to log the last sent config
+    save_config_to_file(config_from_bar)
 
     try:
         # Send the config we received from Bar to the switcher
