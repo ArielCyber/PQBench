@@ -38,8 +38,8 @@ Containers = {
     "linux_kyber": os.getenv("URL_LINUX_KYBER", "http://linux-kyber:5000"),
     "linux_mlkem": os.getenv("URL_LINUX_MLKEM", "http://linux-mlkem:5000"),
 
-    "windows_kyber": os.getenv("URL_WINDOWS_KYBER", "http://windows-kyber:5000"),
-    "windows_mlkem": os.getenv("URL_WINDOWS_MLKEM", "http://windows-mlkem:5000"),
+    "windows_kyber": os.getenv("URL_WINDOWS_KYBER", "http://win-kyber:5000"),
+    "windows_mlkem": os.getenv("URL_WINDOWS_MLKEM", "http://win-mlkem:5000"),
 
     "macos_kyber": os.getenv("URL_MACOS_KYBER", "http://macos-kyber:5000"),
     "macos_mlkem": os.getenv("URL_MACOS_MLKEM", "http://macos-mlkem:5000"),
@@ -212,41 +212,36 @@ def config_handler():
           3) poll sniffer /status; if 'qualified_reached' → proactively call /done
           4) in any case, call sniffer /done (idempotent) at the end, with all session_ids
         """
-        poll_interval = float(os.getenv("SNIFFER_POLL_INTERVAL_SEC", "5"))  # seconds
-        per_session = float(os.getenv("SNIFFER_WAIT_PER_SESSION", "30"))  # seconds per session
-        # Hard cap (env) to avoid unbounded waits; default 3 hours
-        max_cap = float(os.getenv("SNIFFER_MAX_WAIT_CAP", "10800"))
-        max_wait = min(per_session * max(1, jb["sessions"]), max_cap)
+        poll_interval = float(os.getenv("SNIFFER_POLL_INTERVAL_SEC", "5"))
+        per_session = float(os.getenv("SNIFFER_WAIT_PER_SESSION", "30"))
+        max_wait = per_session * max(1, jb["sessions"])
+        max_wait_cap = float(os.getenv("SNIFFER_MAX_TOTAL_WAIT_SEC", "10800"))  # 3h default
+        if max_wait > max_wait_cap:
+            logging.warning("Capping max_wait from %.0fs to %.0fs", max_wait, max_wait_cap)
+            max_wait = max_wait_cap
 
-        if per_session * max(1, jb["sessions"]) > max_cap:
-            logging.warning(
-                "job[%d] planned wait %ss exceeds cap %ss; capping.",
-                jb["idx"], per_session * max(1, jb["sessions"]), max_cap
-            )
+        stop_on_sender_done = os.getenv("SWITCHER_STOP_ON_SENDER_DONE", "true").lower() in {"1", "true", "yes"}
+        sender_done_grace = float(os.getenv("SENDER_DONE_GRACE_SEC", "2.0")) # to capture last ch/sh, maybe switch to sleep?
 
-        logging.info(
-            "job[%d] routed_to=%s | wait plan: sessions=%d, per_session=%ss -> max_wait=%ss (cap=%ss)",
-            jb["idx"], jb["target_key"], jb["sessions"], per_session, max_wait, max_cap
-        )
+        logging.info("job[%d] routed_to=%s | wait plan: sessions=%d, per_session=%ss -> max_wait=%ss",
+                     jb["idx"], jb["target_key"], jb["sessions"], per_session, max_wait)
 
         sem = _backend_slots[jb["target_key"]]
         with sem:
-            # resolve backend container IP for targeting the sniffer BPF
             backend_ip = _resolve_service_ip(jb["target_base"])
             logging.info("job[%d] backend ip resolved: %s", jb["idx"], backend_ip)
 
-            # sniffer /start
+            # 1) sniffer /start (session_count=N)
             start_target = {
                 "os": jb["opsys"],
                 "browser": jb["browser"],
                 "algo": jb["algo_code"],
                 "container_ip": backend_ip,
-                "duration_sec": max_wait,  # an upper bound; monitor should stop earlier
+                "duration_sec": max_wait,  # upper bound; we may stop early
                 "filter_mode": SNIFFER_FILTER_MODE,
-                "domain": SNIFFER_DOMAIN,
+                "domain": SNIFFER_DOMAIN if SNIFFER_FILTER_MODE == "domain" else None,
                 "session_count": jb["sessions"],
             }
-            # strip None fields
             for k in list(start_target.keys()):
                 if start_target[k] is None:
                     del start_target[k]
@@ -263,7 +258,6 @@ def config_handler():
                     sb = {"text": s.text}
                 sn_start["response"] = sb
 
-                # extract session_ids for THIS run
                 children = []
                 if isinstance(sb, dict):
                     if "children" in sb and isinstance(sb["children"], list):
@@ -279,76 +273,99 @@ def config_handler():
                 logging.critical("job[%d] sniffer /start unreachable: %s", jb["idx"], e)
                 sn_start = {"status": 502, "response": {"error": f"sniffer /start unreachable: {e}"}}
 
-            # tiny arm wait
-            time.sleep(0.5)
+            time.sleep(0.5)  # tiny arm wait
 
-            # 2) backend /execute
+            # 2) backend /execute (SENDER)
             exec_url = f'{jb["target_base"]}{TARGET_ENDPOINT}'
             exec_payload = {
                 "os": jb["opsys"],
                 "browser": jb["browser"],
                 "algorithm": jb["algo_code"],  # INT 0/1/2 expected by sender
-                "sessions": jb["sessions"],  # info for sender; sniffer owns counting
+                "sessions": jb["sessions"],
             }
             backend_exec = {"status": None, "response": None}
+            sender_says_done = False
             try:
                 logging.info("job[%d] backend /execute -> %s | payload=%s", jb["idx"], exec_url, exec_payload)
-                # Give sender a tad more than sniffer's max_wait
-                single_request = requests.post(exec_url, json=exec_payload, timeout=max_wait + 60)
-                backend_exec["status"] = single_request.status_code
+                r = requests.post(exec_url, json=exec_payload, timeout=None)  # let sender run to completion
+                backend_exec["status"] = r.status_code
                 try:
-                    backend_exec["response"] = single_request.json()
+                    backend_exec["response"] = r.json()
                 except ValueError:
-                    backend_exec["response"] = {"text": single_request.text}
-                logging.info("job[%d] backend /execute returned %s", jb["idx"], single_request.status_code)
+                    logging.debug("Could not reach the /execute")
+                    backend_exec["response"] = {"text": r.text}
+                    return Response(json.dumps(r, indent=2, ensure_ascii=False),
+                                    status=500, mimetype="application/json")
+
+                logging.info("job[%d] backend /execute returned %s", jb["idx"], r.status_code)
+
+                # ---- NEW: Stop-on-sender-done path ----
+                if stop_on_sender_done and r.ok:
+                    body = backend_exec["response"] or {}
+                    if isinstance(body, dict) and body.get("status") == "done":
+                        sender_says_done = True
+                        logging.info("job[%d] sender reports status=done; stopping sniffer now", jb["idx"])
             except requests.RequestException as e:
                 logging.error("job[%d] backend unreachable: %s", jb["idx"], e)
                 backend_exec = {"status": 502, "response": {"error": f"backend unreachable: {e}"}}
 
-            # 3) POLL sniffer /status with early-stop on qualified_reached
-            def reached_or_done(body: dict, child_ids: list[str]) -> str | None:
-                """
-                Returns:
-                  "reached"  -> one of our sessions has qualified_reached==True
-                  "done"     -> all our sessions are done==True (files written)
-                  None       -> keep waiting
-                """
-                sessions = body.get("sessions", [])
-                if not isinstance(sessions, list):
-                    return None
-
-                by_id = {s.get("session_id"): s for s in sessions if isinstance(s, dict)}
-
-                if child_ids:
-                    # Early stop when any of our session_ids reached target
-                    for sid in child_ids:
-                        s = by_id.get(sid)
-                        if s and s.get("qualified_reached") is True:
-                            return "reached"
-                    # Done only when all of our session_ids are done
-                    if all(by_id.get(sid, {}).get("done") is True for sid in child_ids):
-                        return "done"
-                    return None
-
-                # Fallback: early stop if any session for this IP reached target
-                reached = any(
-                    s.get("container_ip") == backend_ip and s.get("qualified_reached") is True
-                    for s in sessions
-                )
-                if reached:
-                    return "reached"
-
-                # Done when all sessions for this IP are done
-                relevant = [s for s in sessions if s.get("container_ip") == backend_ip]
-                if relevant and all(s.get("done") is True for s in relevant):
-                    return "done"
-
-                return None
-
-            sn_status_samples = []
             start_ts = time.time()
             finished = False
-            sn_done_called = False
+            sn_status_samples = []
+
+            # 3a) If sender said done -> stop sniffer immediately
+            if sender_says_done:
+                if sender_done_grace > 0:
+                    time.sleep(sender_done_grace)  # tiny grace to let last packets flush
+
+                sn_done = {"status": None, "response": None}
+                done_payload = {"container_ip": backend_ip}
+                if child_ids:
+                    done_payload["session_ids"] = child_ids
+                try:
+                    logging.info("job[%d] sniffer /done (sender_done) -> %s | payload=%s",
+                                 jb["idx"], SNIFFER_URL, done_payload)
+                    d = requests.post(f"{SNIFFER_URL}/done", json=done_payload, timeout=20)
+                    try:
+                        d_body = d.json()
+                    except ValueError:
+                        d_body = {"text": d.text}
+                    sn_done = {"status": d.status_code, "response": d_body}
+                    logging.info("job[%d] sniffer /done returned %s", jb["idx"], d.status_code)
+                except requests.RequestException as e:
+                    logging.error("job[%d] sniffer /done unreachable: %s", jb["idx"], e)
+                    sn_done = {"status": 502, "response": {"error": f"sniffer /done unreachable: {e}"}}
+
+                finished = True  # we intentionally stopped
+                return {
+                    "routed_to": jb["target_key"],
+                    "backend": {"execute": backend_exec},
+                    "sniffer": {
+                        "start": sn_start,
+                        "wait": {
+                            "polled": False,
+                            "interval_sec": poll_interval,
+                            "max_wait_sec": max_wait,
+                            "elapsed_sec": round(time.time() - start_ts, 2),
+                            "finished": finished,
+                            "samples": sn_status_samples,
+                            "reason": "sender_done",
+                        },
+                        "done": sn_done,
+                    }
+                }
+
+            # 3b) Otherwise, fallback to legacy sniffer-status polling
+            def all_done(body: dict, child_ids: list[str]) -> bool:
+                sessions = {s.get("session_id"): s for s in body.get("sessions", [])}
+                for sid in child_ids:
+                    s = sessions.get(sid)
+                    if not s:
+                        return False
+                    if not (s.get("qualified_reached") or s.get("done")):
+                        return False
+                return True
+
             logging.info("job[%d] polling sniffer /status every %ss up to %ss",
                          jb["idx"], poll_interval, max_wait)
 
@@ -359,43 +376,23 @@ def config_handler():
                 except Exception as e:
                     body = {"error": f"status unreachable: {e}"}
 
-                # keep a few samples for debugging
-                if len(sn_status_samples) < 6:
+                if len(sn_status_samples) < 4:
                     sn_status_samples.append(body)
 
-                flag = reached_or_done(body, child_ids)  # "reached" | "done" | None
-                if flag == "reached":
-                    logging.info("job[%d] sniffer reached target sessions → issuing /done now", jb["idx"])
-                    if not sn_done_called:
-                        try:
-                            done_payload = {"container_ip": backend_ip}
-                            if child_ids:
-                                # Ask the sniffer to close *just* these session ids
-                                done_payload["session_ids"] = child_ids
-                            d = requests.post(f"{SNIFFER_URL}/done", json=done_payload, timeout=20)
-                            sn_done_called = True
-                            logging.info("job[%d] sniffer /done responded status=%s",
-                                         jb["idx"], getattr(d, "status_code", "?"))
-                        except Exception as e:
-                            logging.warning("job[%d] sniffer /done failed: %s", jb["idx"], e)
-                    # Give it one more tick to flip `done`
-                    time.sleep(poll_interval)
-                    continue
-
-                if flag == "done":
+                if isinstance(body, dict) and all_done(body, child_ids):
                     finished = True
-                    logging.info("job[%d] sniffer session(s) report done", jb["idx"])
+                    logging.info("job[%d] sniffer reports this run's session_ids are done", jb["idx"])
                     break
 
                 time.sleep(poll_interval)
 
-            # 4) /done (sniffer) always called (idempotent), targeting THIS run
+            # 4) /done (idempotent) after polling window
             sn_done = {"status": None, "response": None}
+            done_payload = {"container_ip": backend_ip}
+            if child_ids:
+                done_payload["session_ids"] = child_ids
             try:
-                done_payload = {"container_ip": backend_ip}
-                if child_ids:
-                    done_payload["session_ids"] = child_ids
-                logging.info("job[%d] final sniffer /done -> %s | payload=%s",
+                logging.info("job[%d] sniffer /done -> %s | payload=%s",
                              jb["idx"], SNIFFER_URL, done_payload)
                 d = requests.post(f"{SNIFFER_URL}/done", json=done_payload, timeout=20)
                 try:
@@ -403,7 +400,7 @@ def config_handler():
                 except ValueError:
                     d_body = {"text": d.text}
                 sn_done = {"status": d.status_code, "response": d_body}
-                logging.info("job[%d] final sniffer /done returned %s", jb["idx"], d.status_code)
+                logging.info("job[%d] sniffer /done returned %s", jb["idx"], d.status_code)
             except requests.RequestException as e:
                 logging.error("job[%d] sniffer /done unreachable: %s", jb["idx"], e)
                 sn_done = {"status": 502, "response": {"error": f"sniffer /done unreachable: {e}"}}
@@ -449,7 +446,7 @@ def config_handler():
 
     body = {
         "backends": results,
-        "note": "One sniffer /start per job (session_count=N). Early-stop when qualified_reached=true → call /done; otherwise poll until done or timeout."
+        "note": "One sniffer /start per job (session_count=N). Early-stop when sender container finished sending requests or timeout."
     }
 
     pretty = json.dumps(body, indent=2, ensure_ascii=False)
