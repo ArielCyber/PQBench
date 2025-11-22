@@ -1,0 +1,21 @@
+# Dockerfile.macos-kyber
+FROM dockurr/macos:latest
+# If you want to lock to the same version as before, replace :latest
+# with the tag you used (e.g. :1.14)
+
+# Install Python & pip in the *container* layer
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-venv && \
+    rm -rf /var/lib/apt/lists/*
+
+# Our wrapper entrypoint that will:
+# 1) (optionally) install deps from /shared/requirements.txt
+# 2) start processor.py on port 5000
+# 3) exec the original macOS entry script
+COPY docker-entrypoint-macos.sh /docker-entrypoint-macos.sh
+RUN chmod +x /docker-entrypoint-macos.sh
+
+# Keep tini, just change the script it launches
+# Base image uses: ["/usr/bin/tini","-s","/run/entry.sh"]
+ENTRYPOINT ["/usr/bin/tini","-s","/docker-entrypoint-macos.sh"]
