@@ -4,6 +4,7 @@ import sys
 
 from flask import Flask, request, jsonify
 
+from sender_factory import SenderFactory
 from browser_manager import BrowserLaunchError
 from attributes.video_sender import VideoSender
 from attributes.rtt_sender import RTTSender
@@ -71,41 +72,29 @@ def config_handler():
         logging.debug(f"Browser: {browser}")
         algo = int(data['algorithm'])
         logging.debug(f"Algo: {algo}")
-        amount = int(data['sessions'])
-        logging.debug(f"Amount: {amount}")
-        domain = data.get('domain', 'israelhayom.co.il/you-may-find-interesting/article/17184917')
-        logging.debug(f"Domain: {domain}")
+        sessions_count = int(data['sessions'])
+        logging.debug(f"Amount: {sessions_count}")
+        website_url = data.get('domain', 'israelhayom.co.il/you-may-find-interesting/article/17184917')
+        logging.debug(f"Domain: {website_url}")
         attribute = data.get('attribute')
         logging.debug(f"Attribute: {attribute}")
     except (KeyError, ValueError) as e:
         logging.error(f"Bad request: {e}")
         return jsonify({'Error': f'Bad request: {e}'}), 400
 
-    if amount <= 0:
+    if sessions_count <= 0:
         logging.error("Sessions count must be greater than 0.")
         return jsonify('Error: session count must be a positive number')
 
     try:
 
-        if attribute.lower() == "video":
-            sender = VideoSender(browser, algo, amount, domain)
-        elif attribute.lower() == "rtt":
-            sender = RTTSender(browser, algo, amount, domain)
-        elif attribute.lower() == "map":
-            sender = MapSender(browser, algo, amount, domain)
-        elif attribute.lower() == "game":
-            sender = GameSender(browser, algo, amount, domain)
-        elif attribute.lower() == "download":
-            sender = DownloadSender(browser, algo, amount, domain)
-        elif attribute.lower() == "cloud":
-            sender = CloudSender(browser, algo, amount, domain)
-        elif attribute.lower() == "browsing":
-            sender = BrowserSender(browser, algo, amount, domain)
-        elif attribute.lower() == "audio":
-            sender = AudioSender(browser, algo, amount, domain)
-        else:  # Default
-            logging.error(f"Unknown attribute: {attribute}")
-            sender = VideoSender(browser, algo, amount, domain)
+        sender = SenderFactory.create_sender(
+            attribute=attribute,
+            browser=browser,
+            algo=algo,
+            sessions=sessions_count,
+            website_url=website_url
+        )
 
         sender.run()
         return "done", 200

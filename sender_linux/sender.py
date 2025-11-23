@@ -1,6 +1,7 @@
 import logging
 from abc import ABC, abstractmethod
 from selenium.webdriver.support.wait import WebDriverWait
+from selenium.common.exceptions import TimeoutException
 import os
 
 # Import the components
@@ -66,9 +67,24 @@ class Sender(ABC):
 
                 # Navigate
                 driver.get(self.website_url)
-                WebDriverWait(driver, self.wait_time).until(
-                    lambda d: d.execute_script("return document.readyState") == "complete"
-                )
+
+                interactions_per_session = 1
+
+                for round_index in range(interactions_per_session):
+                    self.logger.info(f"--- Interaction Round {round_index + 1}/{interactions_per_session} ---")
+
+                    if round_index > 0:
+                        # On subsequent rounds, refresh the page to reset state (game, video player, etc.)
+                        self.logger.info("Refreshing page for next round...")
+                        driver.refresh()
+
+                    # WAIT for body to be visible
+                    try:
+                        WebDriverWait(driver, 10).until(
+                            lambda d: d.execute_script("return document.readyState") == "complete"
+                        )
+                    except TimeoutException:
+                        self.logger.warning("Page load wait timed out, proceeding anyway.")
 
                 # Delegate initial interaction
                 interactor.perform_initial_page_load_actions()

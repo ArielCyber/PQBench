@@ -113,7 +113,7 @@ def config_handler():
         raw_jobs = [payload]  # backward compat (single job)
     logging.info("config_handler: number of incoming jobs: %d", len(raw_jobs))
 
-    attributes = ["audio", "browsing", "cloud", "download", "game", "map", "RTT"]  # Need to get from agent
+    attributes = ["video", "audio", "browsing", "cloud", "download", "game", "map", "RTT"]  # Need to get from agent
     domains_by_attribute = _get_domains_by_attribute(attributes)
 
     # ---------- parse & validate and expand jobs ----------

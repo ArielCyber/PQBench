@@ -5,6 +5,7 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver import ActionChains
+from selenium.webdriver.common.keys import Keys
 
 # Regex from the old code for parsing class[index] selectors
 CLASS_INDEX_RE = re.compile(r'^(?P<class>[A-Za-z0-9_\-:.]+)\[(?P<idx>\d+)\]$')
@@ -19,6 +20,7 @@ class PageInteractor:
     def __init__(self, driver: WebDriver):
         self.driver = driver
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.nicknamed_filled = False
 
     def perform_initial_page_load_actions(self):
         """Actions to run immediately after page load."""
@@ -201,13 +203,13 @@ class PageInteractor:
                 ActionChains(self.driver).move_by_offset(cx, cy).click_and_hold().move_by_offset(180,
                                                                                                  10).release().perform()
                 ActionChains(self.driver).move_by_offset(-cx - 180, -cy - 10).perform()
-                time.sleep(0.3)
+                time.sleep(0.5)
 
                 # Pan left
                 ActionChains(self.driver).move_by_offset(cx, cy).click_and_hold().move_by_offset(-160,
                                                                                                  -15).release().perform()
                 ActionChains(self.driver).move_by_offset(-cx + 160, -cy + 15).perform()
-                time.sleep(0.3)
+                time.sleep(0.5)
 
                 # Zoom in/out
                 self.driver.execute_script("""  
@@ -219,7 +221,7 @@ class PageInteractor:
                         el.dispatchEvent(e2);
                     }
                 """, cx, cy)
-                time.sleep(0.3)
+                time.sleep(0.5)
         except Exception as e:
             self.logger.error(f"Error during map pan/zoom: {e}")
         self.logger.info("Map pan/zoom complete.")
@@ -233,22 +235,43 @@ class PageInteractor:
         try:
             inputs = self.driver.find_elements(By.TAG_NAME, "input")
             keywords = ["name", "nickname", "displayname"]
+
             for input_el in inputs:
-                attrs = {
-                    "name": input_el.get_attribute("name") or "",
-                    "id": input_el.get_attribute("id") or "",
-                    "placeholder": input_el.get_attribute("placeholder") or ""
-                }
-                for attr_value in attrs.values():
-                    if any(k in attr_value.lower() for k in keywords):
+                try:
+                    # First check if interactable
+                    if not input_el.is_displayed() or not input_el.is_enabled():
+                        continue
+
+                    attrs = {
+                        "name": input_el.get_attribute("name") or "",
+                        "id": input_el.get_attribute("id") or "",
+                        "placeholder": input_el.get_attribute("placeholder") or ""
+                    }
+
+                    # Check if attributes match keywords
+                    found_keyword = False
+                    for attr_value in attrs.values():
+                        if any(k in attr_value.lower() for k in keywords):
+                            found_keyword = True
+                            break
+
+                    if found_keyword:
+                        # Attempt interaction inside a try block so we don't crash loop
                         input_el.clear()
                         input_el.send_keys(value)
-                        self.logger.info(f"[V] Filled nickname field: {attr_value}")
+                        self.logger.info(f"[V] Filled nickname field: {attrs}")
                         self.nicknamed_filled = True
                         return
+
+                except Exception as inner_e:
+                    # If this specific input fails (InvalidElementState), just try the next one
+                    self.logger.debug(f"Skipping candidate input due to error: {inner_e}")
+                    continue
+
         except Exception as e:
-            self.logger.error(f"Error trying to fill nickname: {e}")
-        self.logger.warning("[X] Could not find nickname field.")
+            self.logger.error(f"General error trying to fill nickname: {e}")
+
+        self.logger.warning("[X] Could not find valid nickname field.")
 
     def press_enter_on_focused(self):
         """Finds the active element and presses ENTER."""

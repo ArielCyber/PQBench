@@ -1,13 +1,13 @@
 import logging
 import os
 
-import undetected_chromedriver as uc
 from selenium import webdriver
 from selenium.common import WebDriverException
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from undetected_chromedriver import WebElement
 from webdriver_manager.firefox import GeckoDriverManager
+from algo_strategies import get_algo_strategy
 
 
 class BrowserLaunchError(RuntimeError):
@@ -24,6 +24,7 @@ class BrowserManager:
     def __init__(self, browser: str, algo: int):
         self.browser = browser
         self.algo = algo
+        self.algo_strategy = get_algo_strategy(algo)
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def setup_driver(self) -> webdriver.Remote:
@@ -35,6 +36,8 @@ class BrowserManager:
             else:
                 driver = self.open_firefox()
 
+            driver.set_page_load_timeout(180)
+            driver.set_script_timeout(180)
             self.logger.info(f"Successfully opened {self.browser}.")
 
             # Set Spoofed Geolocation
@@ -65,15 +68,7 @@ class BrowserManager:
         # Headless mode
         firefox_opts.add_argument("-headless")
 
-        if self.algo == 0:
-            firefox_opts.set_preference('network.http.http3.enable_kyber', False)
-            firefox_opts.set_preference('security.tls.enable_kyber', False)
-            logging.debug("Set non PQC preferences")
-        if self.algo == 1 or self.algo == 2:  # Enable Kyber or MLKEM (Same flags)
-            firefox_opts.set_preference("security.tls.enable_kyber", True)
-            firefox_opts.set_preference("network.http.http3.enabled", True)
-            firefox_opts.set_preference("network.http.http3.enable_kyber", True)
-            logging.debug("Set PQC on")
+        self.algo_strategy.apply_firefox_options(firefox_opts)
 
         try:
             gecko_path = GeckoDriverManager().install()
@@ -99,19 +94,7 @@ class BrowserManager:
         prefs = {"browser": {"enabled_labs_experiments": []}}
 
         # ----- Chrome PQC experiments (via Local State "enabled_labs_experiments") -----
-        if self.algo == 0:
-            prefs["browser"]["enabled_labs_experiments"] = [
-                "enable-tls13-kyber@2",
-                "use-ml-kem@2"]
-
-        elif self.algo == 1:
-            prefs["browser"]["enabled_labs_experiments"] = [
-                "use-ml-kem@2"]
-        elif self.algo == 2:  # ML-KEM
-            prefs["browser"]["enabled_labs_experiments"] = [
-                "enable-tls13-kyber@2",  # Disabled
-                "use-ml-kem@1",  # Enabled
-            ]
+        self.algo_strategy.apply_chrome_options(chrome_opts, prefs)
 
         chrome_opts.add_experimental_option("localState", prefs)
 

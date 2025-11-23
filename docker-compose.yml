@@ -18,7 +18,11 @@ services:
       LOG_LEVEL: ${LOG_LEVEL}
       # add the rest when they are ready
       SNIFFER_DOMAIN: "pq.cloudflareresearch.com"
-
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: [ "CMD", "curl", "-fsS", "http://localhost:5000/health" ]
       interval: 60s
@@ -41,6 +45,7 @@ services:
       DEFAULT_WAIT_TIME: ${DEFAULT_WAIT_TIME}
       VIDEO_WAIT_TIME: ${VIDEO_WAIT_TIME}
       DOWNLOAD_WAIT_TIME: ${DOWNLOAD_WAIT_TIME}
+      RTT_WAIT_TIME: ${RTT_WAIT_TIME}
       CONFIG_SERVICE_URL: ${CONFIG_SERVICE_URL}
     container_name: linux-kyber
     restart: unless-stopped
@@ -53,6 +58,11 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   linux-mlkem:
     shm_size: "1g"        # << big shared memory helps Chrome a lot
@@ -80,6 +90,11 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   domain_maintainer:
     build: ./domain_maintainer
@@ -88,6 +103,11 @@ services:
     ports:
       - "5010:5010"
     networks: [appnet]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 #  agent-worker:
 #    build:
@@ -100,6 +120,11 @@ services:
 #      INTERVAL_SEC: "60"        # change cadence if you want
 #    restart: unless-stopped
 #    networks: [appnet]
+#    logging:
+#      driver: "json-file"
+#      options:
+#        max-size: "10m"
+#        max-file: "3"
 
   sniffer:
     build:
@@ -121,6 +146,11 @@ services:
       interval: 60s
       timeout: 3s
       retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Estimated first install + boot time - 20~ minutes
   # Estimated non first time startup - 1.5~ minutes
