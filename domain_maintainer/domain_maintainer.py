@@ -1,4 +1,8 @@
+import logging
+import sys
+import os
 import pandas
+
 from fastapi import FastAPI, Query, HTTPException
 from typing import List, Dict, Union
 import openpyxl
@@ -6,8 +10,16 @@ from urllib.parse import urlparse
 
 app = FastAPI()
 
+logging.basicConfig(
+    level=os.environ.get("LOGLEVEL", "INFO"),
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+logger = logging.getLogger(__name__)
 
-def get_domains_by_attribute(attributes: List[str], excel_file: str = 'domain_data.xlsx') -> Dict[str, Union[List[str], str]]:
+
+def get_domains_by_attribute(attributes: List[str], excel_file: str = 'domain_data.xlsx') -> Dict[
+    str, Union[List[str], str]]:
     """
     Reads domain data from an Excel file based on a list of attributes.
 
@@ -73,6 +85,9 @@ def get_button_by_domain(domain: str, attribute: str, excel_file: str = 'domain_
         A dictionary containing the values from the first and second columns,
         or raises an HTTPException if the domain or attribute is not found.
     """
+    logging.debug(f"Searching for {domain} in {excel_file} in {attribute}")
+
+    attribute = attribute.lower()
     try:
         # Add a scheme if one is not present
         if not domain.startswith(("http://", "https://")):
@@ -107,6 +122,7 @@ async def get_button(domain: str, attribute: str) -> Dict[str, str]:
     """
     API endpoint to get values for a given domain from a specific attribute worksheet.
     """
+    logging.info(f"Searching for button in {domain} in {attribute}")
     return get_button_by_domain(domain, attribute)
 
 

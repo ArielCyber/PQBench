@@ -103,6 +103,8 @@ services:
     ports:
       - "5010:5010"
     networks: [appnet]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
     logging:
       driver: "json-file"
       options:

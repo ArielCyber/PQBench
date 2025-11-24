@@ -76,7 +76,7 @@ def config_handler():
         logging.debug(f"Amount: {sessions_count}")
         website_url = data.get('domain', 'israelhayom.co.il/you-may-find-interesting/article/17184917')
         logging.debug(f"Domain: {website_url}")
-        attribute = data.get('attribute')
+        attribute = data.get('attribute').lower()
         logging.debug(f"Attribute: {attribute}")
     except (KeyError, ValueError) as e:
         logging.error(f"Bad request: {e}")
@@ -87,7 +87,6 @@ def config_handler():
         return jsonify('Error: session count must be a positive number')
 
     try:
-
         sender = SenderFactory.create_sender(
             attribute=attribute,
             browser=browser,
