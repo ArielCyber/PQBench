@@ -12,7 +12,7 @@ class AlgoStrategy(ABC):
         pass
 
     @abstractmethod
-    def apply_chrome_options(self, options: uc.ChromeOptions, prefs: dict):
+    def apply_chrome_options(self, options: webdriver.ChromeOptions, prefs: dict):
         """Applies specific preferences to Chrome options and localState."""
         pass
 
