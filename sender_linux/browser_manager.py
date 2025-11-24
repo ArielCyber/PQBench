@@ -8,6 +8,7 @@ from selenium.webdriver.firefox.service import Service as FirefoxService
 from undetected_chromedriver import WebElement
 from webdriver_manager.firefox import GeckoDriverManager
 from algo_strategies import get_algo_strategy
+import undetected_chromedriver as uc
 
 
 class BrowserLaunchError(RuntimeError):
@@ -82,16 +83,23 @@ class BrowserManager:
         """
         Launch a Selenium WebDriver for Chrome with a given algorithm.
         """
-        chrome_opts = webdriver.ChromeOptions()
+        chrome_opts = uc.ChromeOptions()
 
-        # Headless Chrome
-        chrome_opts.add_argument("--no-sandbox")  # containers often need this
-        chrome_opts.add_argument("--headless=new")
-        chrome_opts.add_argument("--disable-gpu")  # Windows workaround
+        prefs = {
+            "profile.default_content_setting_values.geolocation": 1,  # 1=Allow, 2=Block
+            "browser": {"enabled_labs_experiments": []}
+        }
+        chrome_opts.add_experimental_option("prefs", prefs)
+        chrome_opts.add_argument("--ignore-certificate-errors")
+        chrome_opts.add_argument("--allow-insecure-localhost")
+        chrome_opts.add_argument("--start-maximized")
+        chrome_opts.add_argument("--no-sandbox")
+        chrome_opts.add_argument("--enable-logging")
+        chrome_opts.add_argument("--v=1")
         chrome_opts.add_argument("--disable-dev-shm-usage")
-        chrome_opts.add_argument("--remote-debugging-port=0")  # avoids DevTools port collision
-
-        prefs = {"browser": {"enabled_labs_experiments": []}}
+        chrome_opts.add_argument("--disable-gpu")
+        chrome_opts.add_argument("--disable-features=HttpsUpgrades,HttpsFirstMode")
+        chrome_opts.add_argument("--disable-blink-features=AutomationControlled")
 
         # ----- Chrome PQC experiments (via Local State "enabled_labs_experiments") -----
         self.algo_strategy.apply_chrome_options(chrome_opts, prefs)
@@ -100,8 +108,14 @@ class BrowserManager:
 
         try:
             chromedriver_path = os.environ.get("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
-            service = ChromeService(executable_path=chromedriver_path)
-            return webdriver.Chrome(options=chrome_opts, service=service)
+            driver = uc.Chrome(
+                options=chrome_opts,
+                driver_executable_path=chromedriver_path,
+                headless=True,
+                use_subprocess=True,  # Often helpful in Docker to prevent zombie processes
+                version_main=None  # Let UC detect version, or specify if needed (e.g., 139)
+            )
+            return driver
         except WebDriverException as e:
             logging.critical(e)
             raise BrowserLaunchError("Failed to open Chrome: is Chrome installed and the driver up to date?") from e

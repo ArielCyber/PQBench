@@ -437,7 +437,7 @@ def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | N
             log.warning(f"[{session_id}] 0 packets captured")
         wrpcap(child_session.outfile, packets)
         os.system("sync")
-        time.sleep(0.5)
+        time.sleep(2)
 
         log.info(f"[{session_id}] wrote {child_session.outfile}")
 

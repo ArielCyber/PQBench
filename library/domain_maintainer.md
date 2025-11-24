@@ -23,7 +23,7 @@ The service treats an Excel file (`domain_data.xlsx`) as a database:
 * **Worksheets**: Each sheet represents a category or "attribute" (e.g., `video`, `audio`, `news`).
 * **Columns**:
     * **Column 1**: `shadow_class` (UI styling).
-    * **Column 2**: `play_class` (UI interaction).
+    * **Column 2**: `play_button` (UI interaction).
     * **Column 3**: `domain` (The hostname, e.g., `youtube.com`).
 
 ### Request Flow
@@ -71,7 +71,7 @@ Retrieves the UI configuration (shadow and play classes) for a specific domain w
 ```json
 {
   "shadow_class": "shadow-lg",
-  "play_class": "btn-play-red"
+  "play_button": "btn-play-red"
 }
 ```
 

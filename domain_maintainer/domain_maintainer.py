@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 app = FastAPI()
 
 logging.basicConfig(
-    level=os.environ.get("LOGLEVEL", "INFO"),
+    level=os.environ.get("LOG_LEVEL", "INFO"),
     format='%(asctime)s - %(levelname)s - %(message)s',
     stream=sys.stdout
 )
@@ -107,8 +107,9 @@ def get_button_by_domain(domain: str, attribute: str, excel_file: str = 'domain_
             # Check if the row has enough columns before accessing them
             if len(row) > 2 and row[2].value and hostname in row[2].value:
                 shadow_class = row[0].value or ""
-                play_class = row[1].value or ""
-                return {"shadow_class": shadow_class, "play_class": play_class}
+                play_button = row[1].value or ""
+                logging.debug(f"Found shadow class '{shadow_class}' and play class '{play_button}'")
+                return {"shadow_class": shadow_class, "play_button": play_button}
 
         raise HTTPException(status_code=404, detail=f"Domain '{hostname}' not found in attribute '{attribute}'")
     except FileNotFoundError:

@@ -360,7 +360,15 @@ class PageInteractor:
             links = self.driver.find_elements(By.XPATH,
                                               f"//a[starts-with(@href, '/') or contains(@href, '{base_domain}')]")
 
-            internal_links = [l for l in links if l.is_displayed() and l.is_enabled()]
+            # Elements can change while we are inside the loop, then we would get StaleElementReferenceException
+            internal_links = []
+            for l in links:
+                try:
+                    if l.is_displayed() and l.is_enabled():
+                        internal_links.append(l)
+                except StaleElementReferenceException:
+                    # If the element disappeared while we were checking, just skip it.
+                    continue
             self.logger.info(f"Found {len(internal_links)} clickable internal links.")
 
             clicked_links = 0
@@ -371,6 +379,15 @@ class PageInteractor:
                     # Re-find links each time to avoid StaleElementReferenceException
                     links_fresh = self.driver.find_elements(By.XPATH,
                                                             f"//a[starts-with(@href, '/') or contains(@href, '{base_domain}')]")
+                    if not links_fresh:
+                        self.logger.warning(f"No links found on refresh. Skipping index {i}.")
+                        continue
+
+                    if i >= len(links_fresh):
+                        self.logger.warning(
+                            f"Index {i} out of range (only found {len(links_fresh)} links). Stopping simulation.")
+                        break
+
                     link = links_fresh[i]
 
                     if not (link.is_displayed() and link.is_enabled()):
@@ -378,7 +395,23 @@ class PageInteractor:
 
                     href = link.get_attribute('href')
                     self.logger.info(f"Clicking link {i + 1}: {href}")
-                    link.click()
+
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link)
+                    time.sleep(0.5)
+                    try:
+                        link.click()
+                    except Exception as e:
+                        # Check if the error is specifically about interactability
+                        error_msg = str(e).lower()
+                        if "element not interactable" in error_msg or "click intercepted" in error_msg:
+                            self.logger.warning(
+                                f"Standard click failed (blocked or hidden). Attempting JS Force Click.")
+                            # Force click using JavaScript (ignores visibility/size)
+                            self.driver.execute_script("arguments[0].click();", link)
+                        else:
+                            # If it's a different error, raise it so the outer loop handles it
+                            raise e
+
                     clicked_links += 1
                     time.sleep(3)  # Wait for new page to load
 

@@ -1,3 +1,5 @@
+import logging
+
 from sender import Sender
 from page_interactor import PageInteractor
 import time
@@ -21,6 +23,7 @@ class AudioSender(Sender):
 
         shadow_button = button_data.get("shadow_button")
         play_button = button_data.get("play_button")
+        logging.debug(f"found button to press: {play_button}")
 
         # Clear overlays
         interactor.click_shadow_button_advanced(shadow_button)
