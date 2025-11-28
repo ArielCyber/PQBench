@@ -1,30 +1,49 @@
-from sender import Sender
-from page_interactor import PageInteractor
 import time
+
+import backoff
+import tldextract
+# Selenium Imports
+import undetected_chromedriver as uc
+from page_interactor import PageInteractor
+# Playwright Imports
+from playwright.sync_api import sync_playwright
+from sender import Sender
 
 
 class BrowserSender(Sender):
     """
-    Generates Browsing traffic by scrolling and clicking internal links.
+    Uses Playwright for fast browsing simulation.
     """
+    uses_playwright = True
 
-    def __init__(self, browser: str, algo: int, sessions: int, website_url: str, wait_time: int = None):
-        super().__init__(
-            browser=browser, algo=algo, sessions=sessions,
-            website_url=website_url, attribute="Browsing", wait_time=wait_time
-        )
-        self.logger.info(f"BrowserSender initialized for {website_url}")
+    def create_traffic(self, interactor, data):
+        print(f"[BrowserSender] Starting Playwright logic for {self.website_url}")
 
-    def create_traffic(self, interactor: PageInteractor, button_data: dict):
-        self.logger.info("Running Browsing-specific traffic logic...")
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+            try:
+                page.goto(self.website_url, timeout=60000, wait_until="domcontentloaded")
 
-        shadow_button = button_data.get("shadow_button")
+                # Scroll
+                for _ in range(3):
+                    page.mouse.wheel(0, 1000)
+                    time.sleep(0.5)
+                    page.mouse.wheel(0, -500)
+                    time.sleep(1)
 
-        # Clear overlays
-        interactor.click_shadow_button_advanced(shadow_button)
+                # Click Internal Links
+                links = page.query_selector_all("a[href^='/']")
+                for i in range(min(2, len(links))):
+                    try:
+                        links[i].click(timeout=3000)
+                        print(f"[V] Clicked internal link {i}")
+                        time.sleep(2)
+                    except:
+                        continue
 
-        # Perform browsing simulation (scroll and click links)
-        interactor.perform_browsing_simulation(max_links=2)
-
-        self.logger.info("Browsing simulation complete.")
-        time.sleep(self.wait_time)  # Wait on the last page
+            except Exception as e:
+                print(f"[X] Browser Playwright Error: {e}")
+            finally:
+                browser.close()

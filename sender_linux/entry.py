@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import subprocess
 
 from flask import Flask, request, jsonify
 
@@ -87,15 +88,19 @@ def config_handler():
         return jsonify('Error: session count must be a positive number')
 
     try:
-        sender = SenderFactory.create_sender(
-            attribute=attribute,
-            browser=browser,
-            algo=algo,
-            sessions=sessions_count,
-            website_url=website_url
-        )
+        # sender = SenderFactory.create_sender(
+        #     attribute=attribute,
+        #     browser_str=browser,
+        #     algo=algo,
+        #     sessions=sessions_count,
+        #     website_url=website_url
+        # )
+        #
+        # sender.run()
 
-        sender.run()
+        if attribute == "video":
+            logging.debug(f"Running command for attribute: {attribute}")
+            result = subprocess.run(['python', 'video_sniffer.py'], capture_output=True)
         return "done", 200
     except BrowserLaunchError as e:
         result = jsonify({'Error': str(e)}), 500

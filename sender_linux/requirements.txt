@@ -4,3 +4,6 @@ Flask==3.1.1
 undetected-chromedriver
 tldextract
 backoff==2.2.1
+playwright
+pandas
+openpyxl

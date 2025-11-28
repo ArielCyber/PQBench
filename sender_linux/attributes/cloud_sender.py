@@ -1,36 +1,57 @@
-from sender import Sender
-from page_interactor import PageInteractor
+import os
 import time
+
+import backoff
+import tldextract
+# Selenium Imports
+import undetected_chromedriver as uc
+from page_interactor import PageInteractor
+# Playwright Imports
+from playwright.sync_api import sync_playwright
+from sender import Sender
 
 
 class CloudSender(Sender):
     """
-    Generates Cloud traffic by simulating a file upload.
-
-    For this to work, the ConfigService must be configured:
-    - "play_button": The selector for the <input type="file"> element.
-    - "shadow_button": The selector for the "Submit" or "Upload" button.
+    Uses Playwright specifically for robust file upload handling.
+    Does NOT use PageInteractor (Selenium).
     """
+    uses_playwright = True
 
-    def __init__(self, browser: str, algo: int, sessions: int, website_url: str, wait_time: int = None):
-        super().__init__(
-            browser=browser, algo=algo, sessions=sessions,
-            website_url=website_url, attribute="Cloud", wait_time=wait_time
-        )
-        self.logger.info(f"CloudSender initialized for {website_url}")
+    def create_traffic(self, interactor, data):
+        print(f"[CloudSender] Starting Playwright logic for {self.website_url}")
 
-    def create_traffic(self, interactor: PageInteractor, button_data: dict):
-        self.logger.info("Running Cloud-specific traffic logic...")
+        # Create dummy file
+        dummy_file = "dummy_upload.txt"
+        with open(dummy_file, "w") as f:
+            f.write("Dummy content")
 
-        # Assumes config service maps "play_button" to the file input
-        # and "shadow_button" to the submit button.
-        file_input_selector = button_data.get("play_button")
-        submit_button_selector = button_data.get("shadow_button")
+        with sync_playwright() as p:
+            # We treat 'browser_str' loosely here, usually default to Chromium for Playwright
+            browser = p.chromium.launch(headless=False)
+            context = browser.new_context()
+            page = context.new_page()
 
-        # Upload the file. This method handles all the logic.
-        interactor.upload_file(file_input_selector, submit_button_selector)
+            try:
+                page.goto(self.website_url, timeout=60000, wait_until="domcontentloaded")
 
-        # 2Wait for upload to process
-        self.logger.info(f"Waiting {self.wait_time} seconds for upload to process...")
-        time.sleep(self.wait_time)
-        self.logger.info("Cloud simulation complete.")
+                # Upload Logic
+                try:
+                    page.wait_for_selector('input[type="file"]', timeout=10000)
+                    page.set_input_files('input[type="file"]', dummy_file)
+                    print("[V] File staged for upload")
+
+                    # Try Submit
+                    submit_btn = page.query_selector('button[type="submit"], input[type="submit"]')
+                    if submit_btn:
+                        submit_btn.click()
+                        print("[V] Clicked Submit")
+                except Exception as e:
+                    print(f"[W] Upload interaction failed: {e}")
+
+                time.sleep(self.wait_time)
+            except Exception as e:
+                print(f"[X] Cloud Playwright Error: {e}")
+            finally:
+                browser.close()
+                if os.path.exists(dummy_file): os.remove(dummy_file)

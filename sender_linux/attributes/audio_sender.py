@@ -1,45 +1,40 @@
-import logging
-
-from sender import Sender
-from page_interactor import PageInteractor
 import time
+from typing import Dict
+
+import backoff
+import tldextract
+# Selenium Imports
+import undetected_chromedriver as uc
+from page_interactor import PageInteractor
+# Playwright Imports
+from playwright.sync_api import sync_playwright
+from sender import Sender
 
 
 class AudioSender(Sender):
-    """
-    Generates Audio traffic by clicking a play button and
-    using a JS fallback to force playback.
-    """
+    uses_playwright = False
 
-    def __init__(self, browser: str, algo: int, sessions: int, website_url: str, wait_time: int = None):
-        super().__init__(
-            browser=browser, algo=algo, sessions=sessions,
-            website_url=website_url, attribute="Audio", wait_time=wait_time
-        )
-        self.logger.info(f"AudioSender initialized for {website_url}")
+    def create_traffic(self, interactor: PageInteractor, data: Dict):
+        play_class = data.get("play_class", "")
+        clicked = interactor.click_button_advanced(play_class)
 
-    def create_traffic(self, interactor: PageInteractor, button_data: dict):
-        self.logger.info("Running Audio-specific traffic logic...")
+        time.sleep(5)
 
-        shadow_button = button_data.get("shadow_button")
-        play_button = button_data.get("play_button")
-        logging.debug(f"found button to press: {play_button}")
-
-        # Clear overlays
-        interactor.click_shadow_button_advanced(shadow_button)
-
-        # Try to click the "Play" button
-        clicked = interactor.click_button_advanced(play_button)
-
-        # If not found, try iframes
         if not clicked:
-            interactor.try_iframes(play_button)
+            interactor.try_iframes(play_class)
 
-        # As a fallback, try to force-play the media element
-        # This handles cases where .click() isn't enough
-        interactor.force_play_media(play_button)
+        if isinstance(clicked, WebElement):
+            print("running <audio> play")
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", clicked)
+            clicked.click()
+            self.driver.execute_script("arguments[0].muted = false; return arguments[0].play();", clicked)
+            time.sleep(wait_time)
+            print(f"[V] Captured <Audio> for {wait_time} seconds...")
+        else:
+            self.try_iframes()
+        if not self.play_class:
+            time.sleep(wait_time)
+            print(f"[V] Captured <Audio> for {wait_time} seconds...")
 
-        # Simulate listening time
-        self.logger.info(f"Simulating audio listening for {self.wait_time} seconds...")
+        print(f"[V] Listening to audio for {self.wait_time}s...")
         time.sleep(self.wait_time)
-        self.logger.info("Audio simulation complete.")

@@ -1,40 +1,38 @@
-import logging
-import re
 import time
-from selenium.webdriver.remote.webelement import WebElement
-from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver import ActionChains
-from selenium.webdriver.common.keys import Keys
+import time
 
-# Regex from the old code for parsing class[index] selectors
-CLASS_INDEX_RE = re.compile(r'^(?P<class>[A-Za-z0-9_\-:.]+)\[(?P<idx>\d+)\]$')
+import backoff
+import tldextract
+import undetected_chromedriver as uc
+# Playwright Imports
+from playwright.sync_api import sync_playwright
+# Selenium Imports
+from selenium.common.exceptions import NoSuchElementException
+from selenium import webdriver
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 
 
 class PageInteractor:
     """
-    Handles all interactions with a webpage (clicks, scrolls, iframes).
-    Its single responsibility is to be an "action toolkit".
+    Encapsulates DOM interactions for Selenium-based Senders.
     """
 
-    def __init__(self, driver: WebDriver):
+    def __init__(self, driver: webdriver.Remote, play_class, url, skip_class=""):
         self.driver = driver
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.nicknamed_filled = False
+        self.skip_class = skip_class
+        self.play_class = play_class
+        self.url = url
 
-    def perform_initial_page_load_actions(self):
-        """Actions to run immediately after page load."""
-        # SSL Bypass
-        try:
-            ActionChains(self.driver).send_keys("thisisunsafe").perform()
-            self.logger.info("Sent 'thisisunsafe' for potential SSL bypass.")
-        except Exception:
-            pass  # Ignore if it fails
-
+    def setup_website(self):
+        print(f"\nStarting capture for {self.app_name} with: {self.url}")
+        self.driver.get(self.url)
+        from selenium.webdriver.common.action_chains import ActionChains
+        ActionChains(self.driver).send_keys("thisisunsafe").perform()
+        self.driver.execute_script("if (document.activeElement) document.activeElement.blur();")
+        print("[W] Bypassed SSL warning screen with 'thisisunsafe'")
         time.sleep(2)
-
-        # Scrolling
-        self.logger.info("Scrolling page to trigger lazy-load.")
         self.driver.execute_script(
             "(document.scrollingElement || document.documentElement).scrollTo({top: 99999, behavior: 'smooth'});")
         time.sleep(1)
@@ -42,457 +40,238 @@ class PageInteractor:
             "(document.scrollingElement || document.documentElement).scrollTo({ top: 0, behavior: 'smooth' });")
         time.sleep(2)
 
-    def click_button_advanced(self, selector_string: str) -> bool:
-        """Advanced click logic."""
-        if not selector_string:
-            self.logger.info("No selector string provided to click_button_advanced.")
-            return True
-
-        self.logger.info(f"Attempting advanced click with: '{selector_string}'")
-        groups = [name.strip() for name in selector_string.split(",") if name.strip()]
-        name_done = [False for _ in range(len(groups))]
-
-        for i, group in enumerate(groups):
-            for original_name in [a.strip() for a in group.split("|") if a.strip()]:
-                name, idx = original_name, 0
-                m = CLASS_INDEX_RE.match(original_name)
-                if m:
-                    name, idx = m.group("class"), int(m.group("idx"))
-
-                try:
-                    elements = []
-                    if name.startswith(":"):
-                        xpath = f"//*[contains(normalize-space(string()),'{name[1:]}') or contains(@aria-label, '{name[1:]}')]"
-                        elements = self.driver.find_elements(By.XPATH, xpath)
-                    else:
-                        elements = self.driver.find_elements(By.CLASS_NAME, name)
-                        if not elements:
-                            elements = self.driver.find_elements(By.ID, name)
-
-                    if not elements: continue
-                    if not (0 <= idx < len(elements)):
-                        self.logger.warning(f"Selector '{name}' index {idx} out of range.")
-                        continue
-
-                    element_to_click = elements[idx]
-                    try:
-                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element_to_click)
-                        time.sleep(0.5)
-                        element_to_click.click()
-                        self.logger.info(f"[V] Clicked '{original_name}' (Group {i + 1})")
-                        name_done[i] = True
-                        time.sleep(2)
-                        break
-                    except Exception as e:
-                        self.logger.warning(f"Found '{original_name}' but failed to click: {e}")
-                except Exception as e:
-                    self.logger.error(f"Error finding selector '{name}': {e}")
-
-            if not name_done[i]:
-                self.logger.warning(f"Failed to click any options in group: '{group}'")
-
-        return all(name_done)
-
-    def click_shadow_button_advanced(self, shadow_selector: str):
-        """Searches all shadow DOMs for the given selector."""
-        if not shadow_selector:
-            self.logger.debug("No shadow_button selector provided, skipping.")
-            return
-
-        self.logger.info(f"Attempting to find shadow button: '{shadow_selector}'")
+    def click_shadow_button(self):
+        if not self.skip_class or isinstance(self.skip_class, int): return
+        print("############### shadow_button ##############  ", end='')
         try:
-            clicked = self.driver.execute_script("""
-                const selector = arguments[0];
-                const shadow_hosts = Array.from(document.querySelectorAll("*"))
-                                          .filter(el => el.shadowRoot !== null);
-                for (const host of shadow_hosts) {
-                    const root = host.shadowRoot;
-                    if (!root) continue;
+            shadow_hosts = self.driver.execute_script("""
+                return Array.from(document.querySelectorAll("*"))
+                    .filter(el => el.shadowRoot !== null);
+            """)
+            if not shadow_hosts: print(f"[X] - No shadow_hosts")
+            for host in shadow_hosts:
+                clicked = self.driver.execute_script("""
+                    const footer = arguments[0];
+                    const selector = arguments[1];
+                    const root = footer.shadowRoot;
+                    if (!root) return false;
                     const btn = root.querySelector(selector);
                     if (btn) {
-                        btn.click();
+                        btn.focus();
+                        btn.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+                        btn.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
+                        btn.dispatchEvent(new MouseEvent('click', {bubbles: true}));
                         return true;
                     }
-                }
-                return false;
-            """, shadow_selector)
-
-            if clicked:
-                self.logger.info(f"[V] Clicked shadow button '{shadow_selector}'")
-            else:
-                self.logger.warning(f"[X] Shadow button '{shadow_selector}' not found.")
-        except Exception as e:
-            self.logger.error(f"Error while searching shadow DOM: {e}")
-
-    def try_iframes(self, play_button_selector: str):
-        """Searches iframes for the play button."""
-        self.logger.info("Searching inside iframes...")
-        try:
-            iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
-            if not iframes:
-                self.logger.info("No iframes found.")
-                return
-
-            for index, iframe in enumerate(iframes):
-                if self.handle_iframe(iframe, play_button_selector):
-                    self.logger.info(f"Successfully clicked in iframe #{index}.")
-                    self.click_out_of_iframe()
+                    return false;
+                """, host, self.skip_class)
+                if clicked:
+                    print(f"[V] - Clicked '{self.skip_class}'")
+                    self.skip_class = ""
                     return
                 else:
-                    self.click_out_of_iframe()
+                    print(f"[X] - Couldn't find '{self.skip_class}'")
         except Exception as e:
-            self.logger.error(f"Error searching iframes: {e}")
-            self.click_out_of_iframe()
+            print("[X] - No shadow DOM found")
 
-    def handle_iframe(self, iframe_element: WebElement, play_button_selector: str) -> bool:
-        """Switches to iframe and tries to click play button."""
+    def force_play_media(self, tag_name="video"):
+        """Attempts to play media in the CURRENT frame."""
         try:
-            self.driver.switch_to.frame(iframe_element)
-            self.logger.info("Switched to iframe.")
-            if self.click_button_advanced(play_button_selector):
+            # Check if element exists first to avoid silent JS failures
+            els = self.driver.find_elements(By.TAG_NAME, tag_name)
+            if els:
+                self.driver.execute_script(f"""
+                    const media = document.querySelector('{tag_name}');
+                    if (media) {{
+                        media.muted = false;
+                        media.play().catch(e => console.error("Play failed:", e));
+                    }}
+                """)
                 return True
-            self.logger.info("Button not found in this iframe.")
-            return False
-        except Exception as e:
-            self.logger.error(f"Error handling iframe: {e}")
-            return False
+        except Exception:
+            pass
+        return False
 
-    def click_out_of_iframe(self):
+    def _get_all_iframes_including_shadow(self):
+        """
+        Finds all iframes, including those inside Shadow DOMs.
+        Returns a list of WebElement iframes.
+        """
+        # 1. Standard Iframes
+        iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+
+        # 2. Shadow DOM Iframes (Javascript fallback)
         try:
-            self.driver.switch_to.default_content()
-        except Exception as e:
-            self.logger.error(f"Could not switch to default content: {e}")
+            shadow_iframes = self.driver.execute_script("""
+                function getAllIframes(root) {
+                    let frames = Array.from(root.querySelectorAll('iframe'));
+                    let shadowHosts = root.querySelectorAll('*');
+                    shadowHosts.forEach(host => {
+                        if (host.shadowRoot) {
+                            frames = frames.concat(getAllIframes(host.shadowRoot));
+                        }
+                    });
+                    return frames;
+                }
+                return getAllIframes(document.body);
+            """)
+            if shadow_iframes:
+                # Merge lists, avoiding duplicates if possible (Selenium references handle this poorly, so we just append)
+                iframes.extend(shadow_iframes)
+        except Exception:
+            pass
 
-    def perform_rtt_scrolling(self, duration: int = 10):
-        """Performs continuous up/down scrolling for RTT simulation."""
-        self.logger.info(f"Starting RTT scrolling for {duration} seconds...")
-        t0 = time.time()
-        while time.time() - t0 < duration:
+        return iframes
+
+    def search_and_play_video_recursive(self, depth=0, max_depth=4) -> bool:
+        """
+        Recursively searches for a <video> tag in all iframes (nested & shadow).
+        """
+        if depth > max_depth: return False
+
+        # 1. Try to play in current frame
+        if self.force_play_media("video"):
+            print(f"[DEBUG] Found and played video at depth {depth}")
+            return True
+
+        # 2. Wait slightly if no iframes found yet (Logic for top level only)
+        if depth == 0:
             try:
-                self.driver.execute_script("window.scrollTo(0, 0);")
-                time.sleep(0.3)
-                h = self.driver.execute_script(
-                    "return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) || 2000;")
-                self.driver.execute_script("window.scrollTo(0, Math.min(1200, arguments[0]-800));", h)
-                time.sleep(0.3)
-                self.driver.execute_script("window.scrollBy(0, -300);")
-            except Exception as e:
-                self.logger.warning(f"Error during RTT scroll: {e}")
-            time.sleep(0.8)
-        self.logger.info("RTT scrolling complete.")
+                WebDriverWait(self.driver, 5).until(
+                    lambda d: len(d.find_elements(By.TAG_NAME, "iframe")) > 0 or
+                              len(d.find_elements(By.TAG_NAME, "video")) > 0
+                )
+            except:
+                print("[DEBUG] Timeout waiting for iframes/video to populate.")
 
-    def pan_and_zoom_map(self, duration: int = 10):
-        """Performs map-like panning and zooming."""
-        self.logger.info(f"Starting map pan/zoom for {duration} seconds...")
-        try:
-            w = self.driver.execute_script("return window.innerWidth;")
-            h = self.driver.execute_script("return window.innerHeight;")
-            cx, cy = int(w / 2), int(h / 2)
+        # 3. Get all iframes in this context
+        iframes = self._get_all_iframes_including_shadow()
 
-            # Click center to focus
-            self.driver.execute_script("""
-                const el = document.elementFromPoint(arguments[0], arguments[1]);
-                if (el) el.scrollIntoView({behavior: 'instant', block: 'center', inline: 'center'});
-            """, cx, cy)
-            ActionChains(self.driver).move_by_offset(cx, cy).click().perform()
-            ActionChains(self.driver).move_by_offset(-cx, -cy).perform()  # Reset mouse
+        if not iframes and depth == 0:
+            print("[DEBUG] No iframes found even after wait.")
 
-            t0 = time.time()
-            while time.time() - t0 < duration:
-                # Pan right
-                ActionChains(self.driver).move_by_offset(cx, cy).click_and_hold().move_by_offset(180,
-                                                                                                 10).release().perform()
-                ActionChains(self.driver).move_by_offset(-cx - 180, -cy - 10).perform()
-                time.sleep(0.5)
+        for i, iframe in enumerate(iframes):
+            try:
+                # Switch to frame
+                self.driver.switch_to.frame(iframe)
 
-                # Pan left
-                ActionChains(self.driver).move_by_offset(cx, cy).click_and_hold().move_by_offset(-160,
-                                                                                                 -15).release().perform()
-                ActionChains(self.driver).move_by_offset(-cx + 160, -cy + 15).perform()
-                time.sleep(0.5)
+                # Recurse
+                if self.search_and_play_video_recursive(depth + 1, max_depth):
+                    return True
 
-                # Zoom in/out
-                self.driver.execute_script("""  
-                    const e1 = new WheelEvent('wheel', {deltaY: -220});
-                    const e2 = new WheelEvent('wheel', {deltaY:  220});
-                    const el = document.elementFromPoint(arguments[0], arguments[1]);
-                    if (el) {
-                        el.dispatchEvent(e1);
-                        el.dispatchEvent(e2);
-                    }
-                """, cx, cy)
-                time.sleep(0.5)
-        except Exception as e:
-            self.logger.error(f"Error during map pan/zoom: {e}")
-        self.logger.info("Map pan/zoom complete.")
-
-    def fill_nickname_field(self, value: str = "sinale"):
-        """Finds and fills a nickname/username field."""
-        if self.nicknamed_filled:
-            return
-
-        self.logger.info("Attempting to fill nickname field...")
-        try:
-            inputs = self.driver.find_elements(By.TAG_NAME, "input")
-            keywords = ["name", "nickname", "displayname"]
-
-            for input_el in inputs:
+                # Switch back to parent to continue loop
+                self.driver.switch_to.parent_frame()
+            except Exception:
+                # If frame switching fails (e.g. cross-origin restriction or frame detached), ensure we go back
                 try:
-                    # First check if interactable
-                    if not input_el.is_displayed() or not input_el.is_enabled():
-                        continue
+                    self.driver.switch_to.parent_frame()
+                except:
+                    pass
 
-                    attrs = {
-                        "name": input_el.get_attribute("name") or "",
-                        "id": input_el.get_attribute("id") or "",
-                        "placeholder": input_el.get_attribute("placeholder") or ""
-                    }
+        return False
 
-                    # Check if attributes match keywords
-                    found_keyword = False
-                    for attr_value in attrs.values():
-                        if any(k in attr_value.lower() for k in keywords):
-                            found_keyword = True
-                            break
-
-                    if found_keyword:
-                        # Attempt interaction inside a try block so we don't crash loop
-                        input_el.clear()
-                        input_el.send_keys(value)
-                        self.logger.info(f"[V] Filled nickname field: {attrs}")
-                        self.nicknamed_filled = True
-                        return
-
-                except Exception as inner_e:
-                    # If this specific input fails (InvalidElementState), just try the next one
-                    self.logger.debug(f"Skipping candidate input due to error: {inner_e}")
-                    continue
-
-        except Exception as e:
-            self.logger.error(f"General error trying to fill nickname: {e}")
-
-        self.logger.warning("[X] Could not find valid nickname field.")
-
-    def press_enter_on_focused(self):
-        """Finds the active element and presses ENTER."""
-        self.logger.info("Pressing ENTER on focused element...")
-        try:
-            focused = self.driver.switch_to.active_element
-            if focused:
-                focused.send_keys(Keys.ENTER)
-                self.logger.info("[V] Pressed ENTER.")
-            else:
-                self.logger.warning("No element focused.")
-        except Exception as e:
-            self.logger.error(f"Error pressing ENTER: {e}")
-
-    def force_play_media(self, selector_string: str):
-        """
-        Attempts to find an <audio> or <video> element and force it to play
-        using JavaScript. This is a robust fallback if a simple .click() fails.
-        """
-        if not selector_string:
-            return
-
-        self.logger.info(f"Attempting to force-play media: {selector_string}")
-        # Use the same finding logic as click_button_advanced
-        groups = [name.strip() for name in selector_string.split(",") if name.strip()]
-        for group in groups:
-            for original_name in [a.strip() for a in group.split("|") if a.strip()]:
-                name, idx = original_name, 0
-                m = CLASS_INDEX_RE.match(original_name)
+    def click_play_button(self, tries=0):
+        if not self.play_class: return True
+        print("############# click_play_button ############  ", end='')
+        time.sleep(2)
+        groups = [name.strip() for name in self.play_class.split(",") if name.strip()]
+        nameDone = [False for _ in range(len(groups))]
+        notFoundSoUnloaded = True
+        tries += 1
+        for i, group in enumerate(groups):
+            for originalName in [a.strip() for a in group.split("|") if a.strip()]:
+                name = originalName
+                idx = 0
+                m = CLASS_INDEX_RE.match(originalName)
                 if m:
-                    name, idx = m.group("class"), int(m.group("idx"))
-
+                    name = m.group("class")
+                    idx = int(m.group("idx"))
                 try:
-                    elements = []
-                    # Try to find by selector
                     if name.startswith(":"):
-                        xpath = f"//*[contains(normalize-space(string()),'{name[1:]}') or contains(@aria-label, '{name[1:]}')]"
-                        elements = self.driver.find_elements(By.XPATH, xpath)
+                        elements = self.driver.find_elements(By.XPATH,
+                                                             f"//button[contains(normalize-space(string()),'{name[1:]}')]")
                     else:
                         elements = self.driver.find_elements(By.CLASS_NAME, name)
-                        if not elements:
-                            elements = self.driver.find_elements(By.ID, name)
-
-                    # Also check for <audio> or <video> tags directly
-                    if not elements:
-                        if name.lower() in ['audio', 'video']:
-                            elements = self.driver.find_elements(By.TAG_NAME, name)
-
-                    if not elements: continue
-                    if not (0 <= idx < len(elements)): continue
-
-                    element = elements[idx]
-                    # Check if it's a media element before running JS
-                    if element.tag_name in ['audio', 'video']:
-                        self.logger.info(f"Found media element <{element.tag_name}>. Forcing play...")
-                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-                        self.driver.execute_script("arguments[0].muted = false; return arguments[0].play();", element)
-                        self.logger.info("Force-play command sent.")
-                        return  # Found and played
+                    if not elements and not name.startswith(":"):
+                        elements = self.driver.find_elements(By.ID, name)
+                    if elements:
+                        notFoundSoUnloaded = False
                     else:
-                        self.logger.info(f"Element {name} was found but was not <audio> or <video>.")
-
+                        raise Exception("no elements found")
+                    if idx < 0 or idx >= len(elements):
+                        print(f"[X] - Class/Name '{name}' has {len(elements)} elements; index {idx} is out of range")
+                        continue
+                    for element in elements[idx:]:
+                        try:
+                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+                            time.sleep(0.5)
+                            if element.tag_name.lower() == "audio": return element
+                            element.click()
+                            print(f"[V] - Clicked '{name}'")
+                            self.after_click(group)
+                            nameDone[i] = True
+                            time.sleep(3)
+                            break
+                        except:
+                            continue
                 except Exception as e:
-                    self.logger.warning(f"Could not force-play media '{original_name}': {e}")
-
-    def perform_browsing_simulation(self, max_links: int = 2):
-        """
-        Simulates basic browsing: scrolls and clicks a few internal links.
-        """
-        self.logger.info("Starting browsing simulation...")
-        try:
-            # Scroll around
-            for _ in range(3):
-                self.driver.execute_script("window.scrollBy(0, 1000);")
-                time.sleep(0.2)
-                self.driver.execute_script("window.scrollBy(0, -500);")
-                time.sleep(1)
-
-            # Find and click internal links
-            domain = self.driver.current_url.split('/')[2]  # Get "www.example.com"
-            base_domain = '.'.join(domain.split('.')[-2:])  # Get "example.com"
-            if not base_domain:  # Handle cases like 'localhost'
-                base_domain = domain
-
-            # Find links that start with / OR contain the base domain
-            links = self.driver.find_elements(By.XPATH,
-                                              f"//a[starts-with(@href, '/') or contains(@href, '{base_domain}')]")
-
-            # Elements can change while we are inside the loop, then we would get StaleElementReferenceException
-            internal_links = []
-            for l in links:
-                try:
-                    if l.is_displayed() and l.is_enabled():
-                        internal_links.append(l)
-                except StaleElementReferenceException:
-                    # If the element disappeared while we were checking, just skip it.
+                    print(f"[X] - Couln't find {name}")
                     continue
-            self.logger.info(f"Found {len(internal_links)} clickable internal links.")
+                if nameDone[i]: break
+        if notFoundSoUnloaded:
+            if tries > 0:
+                print(f"[X] - Unloaded '{self.play_class}'")
+                return False
+            self.click_play_button(tries)
+        for curNameDone in nameDone:
+            if curNameDone: return True
+        return False
 
-            clicked_links = 0
-            for i in range(len(internal_links)):
-                if clicked_links >= max_links:
-                    break
-                try:
-                    # Re-find links each time to avoid StaleElementReferenceException
-                    links_fresh = self.driver.find_elements(By.XPATH,
-                                                            f"//a[starts-with(@href, '/') or contains(@href, '{base_domain}')]")
-                    if not links_fresh:
-                        self.logger.warning(f"No links found on refresh. Skipping index {i}.")
-                        continue
+    def after_click(self, name):
+        self.play_class = ",".join([c for c in self.play_class.split(",") if c.strip() != name])
 
-                    if i >= len(links_fresh):
-                        self.logger.warning(
-                            f"Index {i} out of range (only found {len(links_fresh)} links). Stopping simulation.")
-                        break
+    def try_iframes(self):
+        print(f"################## iframe ##################  ", end='')
+        self.driver.switch_to.default_content()
+        iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+        for iframe in iframes:
+            if self.handle_iframe(iframe): return True
+        return False
 
-                    link = links_fresh[i]
+    def click_outof_iframe(self):
+        if not self.play_class: return True
+        self.driver.switch_to.default_content()
+        clicked = self.click_play_button()
+        time.sleep(2)
+        self.force_play_media()
+        return clicked
 
-                    if not (link.is_displayed() and link.is_enabled()):
-                        continue
-
-                    href = link.get_attribute('href')
-                    self.logger.info(f"Clicking link {i + 1}: {href}")
-
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link)
-                    time.sleep(0.5)
-                    try:
-                        link.click()
-                    except Exception as e:
-                        # Check if the error is specifically about interactability
-                        error_msg = str(e).lower()
-                        if "element not interactable" in error_msg or "click intercepted" in error_msg:
-                            self.logger.warning(
-                                f"Standard click failed (blocked or hidden). Attempting JS Force Click.")
-                            # Force click using JavaScript (ignores visibility/size)
-                            self.driver.execute_script("arguments[0].click();", link)
-                        else:
-                            # If it's a different error, raise it so the outer loop handles it
-                            raise e
-
-                    clicked_links += 1
-                    time.sleep(3)  # Wait for new page to load
-
-                    # After navigation, we must break or re-find elements
-                    # For this sim, we'll try to go back and continue
-                    if clicked_links < max_links:
-                        self.logger.info("Navigating back to continue browsing.")
-                        self.driver.back()
-                        time.sleep(2)
-
-                except Exception as e:
-                    self.logger.warning(f"Could not click link {i + 1}: {e}")
-                    # Try to recover by going back
-                    try:
-                        self.driver.back()
-                        time.sleep(2)
-                    except Exception as back_e:
-                        self.logger.error(f"Could not navigate back: {back_e}")
-                        break  # Stop simulation
-
-        except Exception as e:
-            self.logger.error(f"Error during browsing simulation: {e}")
-
-    def upload_file(self, file_input_selector: str, submit_selector: str):
-        """
-        Simulates a file upload: creates a dummy file, finds the input,
-        sends the file path, and clicks submit.
-        """
-        if not file_input_selector:
-            self.logger.warning("No file input selector provided. Cannot upload.")
-            return
-
-        self.logger.info("Starting file upload simulation...")
-
-        # Create a dummy file
-        dummy_file_name = "dummy_upload.txt"
-        dummy_file_path = os.path.abspath(dummy_file_name)
+    def try_iframes_in_iframe(self):
         try:
-            with open(dummy_file_path, "w") as f:
-                f.write("This is a dummy file for traffic generation.")
-            self.logger.info(f"Created dummy file at: {dummy_file_path}")
-
-            # Find the file input element
-            file_input = None
-            try:
-                # Try finding by common selectors
-                if file_input_selector.startswith(":"):
-                    file_input = self.driver.find_element(By.XPATH,
-                                                          f"//input[@type='file' and contains(@aria-label, '{file_input_selector[1:]}')]")
-                elif file_input_selector.startswith("."):
-                    file_input = self.driver.find_element(By.CLASS_NAME, file_input_selector[1:])
-                elif file_input_selector.startswith("#"):
-                    file_input = self.driver.find_element(By.ID, file_input_selector[1:])
-                else:
-                    # Fallback to a generic input[type=file]
-                    file_input = self.driver.find_element(By.CSS_SELECTOR, "input[type='file']")
-            except Exception as e:
-                self.logger.error(
-                    f"Could not find file input element with selector '{file_input_selector}'. Error: {e}")
-                return
-
-            # Send the file path to the input
-            # Selenium requires send_keys on the <input> element
-            file_input.send_keys(dummy_file_path)
-            self.logger.info("Sent file path to input element.")
-            time.sleep(1)
-
-            # Click the submit button
-            if submit_selector:
-                self.logger.info(f"Clicking submit button: {submit_selector}")
-                # Use click_button_advanced for complex submit buttons
-                self.click_button_advanced(submit_selector)
-            else:
-                self.logger.info("No submit selector, assuming upload starts automatically.")
-
-            time.sleep(4)  # Wait for upload to process
-
+            print(f"############# iframe in iframe #############  ", end='')
+            self.driver.switch_to.default_content()
+            iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+            for iframe in iframes:
+                self.driver.switch_to.frame(iframe)
+                iframes2 = self.driver.find_elements(By.TAG_NAME, "iframe")
+                for iframe2 in iframes2:
+                    if self.handle_iframe(iframe2): return True
+            return False
         except Exception as e:
-            self.logger.error(f"File upload failed: {e}")
-        finally:
-            # Clean up the dummy file
-            if os.path.exists(dummy_file_path):
-                os.remove(dummy_file_path)
-                self.logger.info("Cleaned up dummy file.")
+            return False
+
+    def handle_iframe(self, iframe):
+        try:
+            self.driver.switch_to.frame(iframe)
+            time.sleep(2)
+            clicked = self.click_play_button()
+            if clicked and not self.click_outof_iframe():
+                self.try_iframes()
+            time.sleep(2)
+            if clicked and self.force_play_media():
+                self.driver.switch_to.default_content()
+                return True
+            self.driver.switch_to.default_content()
+        except:
+            self.driver.switch_to.default_content()
+        return False

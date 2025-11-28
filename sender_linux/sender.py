@@ -1,112 +1,56 @@
-import logging
+import tldextract
 from abc import ABC, abstractmethod
-from selenium.webdriver.support.wait import WebDriverWait
-from selenium.common.exceptions import TimeoutException
-import os
+from typing import Dict, Optional, Any
 
-# Import the components
-from browser_manager import BrowserManager, BrowserLaunchError
-from page_interactor import PageInteractor
+import backoff
+import tldextract
+import undetected_chromedriver as uc
+from playwright.sync_api import sync_playwright
+
+from browser_manager import BrowserManager
 from config_service import ConfigService
+from page_interactor import PageInteractor
 
 
 class Sender(ABC):
-    """
-    Orchestrates the traffic generation process.
-    It USES a BrowserManager, ConfigService, and PageInteractor.
-    Its single responsibility is to manage the overall flow.
-    """
+    """Abstract Base Class for all traffic senders."""
 
-    def __init__(self, browser: str, algo: int, sessions: int, website_url: str,
-                 attribute: str, wait_time=10):
-        self.website_url = website_url
+    uses_playwright = False
+
+    def __init__(self, attribute: str, browser_str: str, sessions: int, website_url: str, wait_time: int, algo: int):
         self.attribute = attribute
+        self.browser_str = browser_str
         self.sessions = sessions
+        self.website_url = website_url
         self.wait_time = wait_time
-        self.logger = logging.getLogger(self.__class__.__name__)
 
-        # --- COMPOSITION ---
-        # Sender owns and delegates to these specialists
-        self.browser_manager = BrowserManager(browser, algo)
+        # Dependencies
         self.config_service = ConfigService()
-        # -------------------
-
-        if wait_time is not None:
-            self.wait_time = wait_time
-        else:
-            # Try to find an attribute-specific env var (e.g., VIDEO_WAIT_TIME)
-            specific_wait_env = f"{attribute.upper()}_WAIT_TIME"
-            default_wait_env = os.environ.get("DEFAULT_WAIT_TIME", "10")  # Default 10 if nothing found
-
-            self.wait_time = int(os.environ.get(specific_wait_env, default_wait_env))
-
-        self.logger.info(f"Set wait time to {self.wait_time} seconds")
-        self.button_data: dict = {}
+        self.browser_manager = BrowserManager(browser_str, algo)
 
     def run(self):
-        """Executes the full traffic generation flow."""
-        self.logger.info(f"--- Starting traffic generation for {self.website_url} ---")
+        """Main Template Method."""
+        print(f"\n[{self.attribute}] Starting sender for {self.website_url}")
 
-        # Fetch config ONCE
-        self.button_data = self.config_service.get_button_values(self.website_url, self.attribute) or {}
-        if self.button_data:
-            self.logger.info(f"Got button config: {self.button_data}")
+        # Fetch Config
+        config_data = self.config_service.get_button_values(self.website_url, self.attribute) or {}
+
+        if self.uses_playwright:
+            self.create_traffic(None, config_data)
         else:
-            self.logger.warning("Could not fetch button config. Proceeding without.")
-
-        # Loop for each session
-        for i in range(self.sessions):
-            self.logger.info(f"Starting session {i + 1} of {self.sessions}...")
-            driver = None
+            # Selenium Lifecycle
+            driver = self.browser_manager.setup_driver()
             try:
-                # Delegate browser setup
-                driver = self.browser_manager.setup_driver()
-
-                # Create a PageInteractor for this specific driver
-                interactor = PageInteractor(driver)
-
-                # Navigate
                 driver.get(self.website_url)
-
-                interactions_per_session = 1
-
-                for round_index in range(interactions_per_session):
-                    self.logger.info(f"--- Interaction Round {round_index + 1}/{interactions_per_session} ---")
-
-                    if round_index > 0:
-                        # On subsequent rounds, refresh the page to reset state (game, video player, etc.)
-                        self.logger.info("Refreshing page for next round...")
-                        driver.refresh()
-
-                    # WAIT for body to be visible
-                    try:
-                        WebDriverWait(driver, 10).until(
-                            lambda d: d.execute_script("return document.readyState") == "complete"
-                        )
-                    except TimeoutException:
-                        self.logger.warning("Page load wait timed out, proceeding anyway.")
-
-                # Delegate initial interaction
-                interactor.perform_initial_page_load_actions()
-
-                # Call the child class's specific logic
-                # We pass the interactor and config to the child
-                self.create_traffic(interactor, self.button_data)
-
+                interactor = PageInteractor(driver, config_data.get("play_class", ""), self.website_url)
+                interactor.click_shadow_button()
+                self.create_traffic(interactor, config_data)
             except Exception as e:
-                self.logger.error(f"Error during session {i + 1}: {e}", exc_info=True)
+                print(f"[X] Error in Sender run: {e}")
             finally:
-                # Cleanup
                 if driver:
                     driver.quit()
-                self.logger.info(f"Finished session {i + 1}.")
-
-        self.logger.info(f"--- Finished all traffic for {self.website_url} ---")
 
     @abstractmethod
-    def create_traffic(self, interactor: PageInteractor, button_data: dict):
-        """
-        Main logic for generating traffic, implemented by child classes.
-        It receives the PageInteractor and button config to perform its work.
-        """
+    def create_traffic(self, interactor: Optional[PageInteractor], data: Dict[str, Any]):
         pass

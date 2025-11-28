@@ -1,58 +1,43 @@
-import logging
 import time
+from typing import Dict
 
-from sender import Sender
+import backoff
+import tldextract
+import undetected_chromedriver as uc
 from page_interactor import PageInteractor
+from sender import Sender
 
 
 class VideoSender(Sender):
-    """
-    Generates web traffic that simulates watching a video.
-    """
+    uses_playwright = False
 
-    def __init__(self, browser: str, algo: int, sessions: int, website_url: str, wait_time: int = None):
-        # We pass "Video" as the attribute, which is used by the
-        # ConfigService to fetch the correct button names.
-        super().__init__(
-            browser=browser,
-            algo=algo,
-            sessions=sessions,
-            website_url=website_url,
-            attribute="Video",  # Hardcoded for this class
-            wait_time=wait_time
-        )
-        self.logger.info(f"VideoSender initialized for {website_url}")
+    def create_traffic(self, interactor: PageInteractor, data: Dict):
+        try:
+            play_class = data.get("play_class", "")
 
-    def create_traffic(self, interactor: PageInteractor, button_data: dict):
-        """
-        Implements the specific traffic generation logic for a video
-        by delegating actions to the PageInteractor.
-        """
-        self.logger.info("Running video-specific traffic logic...")
+            time.sleep(1)
+            clicked = interactor.click_play_button(play_class)
+            time.sleep(3)
 
-        # Get button names from the data passed by the base class
-        shadow_button = button_data.get("shadow_button")
-        play_button = button_data.get("play_button")
+            found_video = interactor.search_and_play_video_recursive()
 
-        # Delegate shadow button click
-        interactor.click_shadow_button_advanced(shadow_button)
+            if found_video:
+                print(f"[V] Captured <Video> (playing for {self.wait_time}s)...")
+                time.sleep(float(self.wait_time))
+            else:
+                # Fallback: If we couldn't find a <video> tag, maybe the 'play_class' click
+                # opened a new player? Try iframes specifically for the button if we haven't already.
+                if not clicked:
+                    print("[DEBUG] Video tag not found, trying to click buttons inside iframes...")
+                    if interactor.try_iframes(play_class):
+                        # Try finding video again after clicking in iframe
+                        if interactor.search_and_play_video_recursive():
+                            print(f"[V] Captured <Video> after iframe click...")
+                            time.sleep(float(self.wait_time))
+                            return
 
-        # Delegate main play button click
-        self.logger.info("Attempting to click main play button...")
-        play_clicked = interactor.click_button_advanced(play_button)
-
-        # Delegate iframe search if needed
-        if not play_clicked:
-            self.logger.info("Main play button not found, searching iframes...")
-            interactor.try_iframes(play_button)
-        else:
-            self.logger.info("Main play button clicked successfully.")
-
-        self.logger.info("Attempting to force-play media as a fallback...")
-        interactor.force_play_media(play_button)
-
-        # Simulate watch time
-        watch_duration = 30
-        self.logger.info(f"Simulating video watch time for {watch_duration} seconds...")
-        time.sleep(watch_duration)
-        self.logger.info("Video simulation complete.")
+            print(f"[V] Watching video for {self.wait_time}s...")
+            time.sleep(self.wait_time)
+        except Exception as e:
+            # Catch-all to prevent the 'NameError' from hiding the real issue
+            print(f"[X] Unexpected error in VideoSender: {e}")
