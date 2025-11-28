@@ -14,6 +14,6 @@ COPY agent.py /app/agent.py
 # The Agent is now a server
 EXPOSE 5000
 
-# Run the gunicorn server (same as the switcher)
-# This command runs the 'app' variable inside the 'agent.py' file.
-CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5000", "agent:app"]
+# Run the gunicorn server with INCREASED TIMEOUT
+# Added --timeout 300 to match the requests.post timeout
+CMD ["gunicorn", "--timeout", "300", "-w", "1", "-b", "0.0.0.0:5000", "agent:app"]
