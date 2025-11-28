@@ -85,7 +85,6 @@ def run_all_matrix():
     else:
         target_os_list = ["linux", "windows", "macos"]
 
-
     if "browser" in base_config:
         target_browser_list = [base_config["browser"]]
     else:
@@ -94,17 +93,19 @@ def run_all_matrix():
     if "algorithm" in base_config:
         target_algo_list = [base_config["algorithm"]]
     else:
-        target_algo_list = ["kyber", "mlkem"]
+        target_algo_list = ["kyber", "mlkem", "non-pqc"]
         
+    # 4. Sessions default
     if "sessions" not in base_config:
         base_config["sessions"] = 5
 
     generated_jobs = []
 
+    # 5. Generate Matrix
     for os_name in target_os_list:
         for browser in target_browser_list:
             for algo in target_algo_list:
-
+                
                 job = base_config.copy()
                 
                 job["os"] = os_name
