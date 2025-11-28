@@ -1,8 +1,7 @@
 import os
 import requests
 import json
-from flask import Flask, request, jsonify
-from datetime import datetime
+from flask import Flask, request, jsonify 
 import logging
 import time
 
@@ -30,8 +29,12 @@ def save_config_to_file(config, filename="last_sent_config.json"):
 
 
 def send_batch_to_switcher(batch_payload):
+    """
+    Helper function: Sends the prepared batch payload to the Switcher.
+    """
     save_config_to_file(batch_payload)
     try:
+        # Timeout set to 5 minutes because batch processing takes time
         response = requests.post(ENTRY_CONTROLLER_URL, json=batch_payload, timeout=300)
         
         logging.info(f"Switcher batch response code: {response.status_code}")
@@ -47,10 +50,12 @@ def send_batch_to_switcher(batch_payload):
         return jsonify({"status": "error", "message": f"Failed to reach switcher: {e}"}), 502
 
 
-
-
 @app.route('/run_experiment', methods=['POST'])
 def handle_experiment_request():
+    """
+    Mode 1: Manual List.
+    Takes a specific list from Bar, wraps it, and sends it.
+    """
     experiments_list = request.get_json()
 
     if not isinstance(experiments_list, list) or not experiments_list:
@@ -62,8 +67,13 @@ def handle_experiment_request():
     batch_payload = {"jobs": experiments_list}
     return send_batch_to_switcher(batch_payload)
 
+
 @app.route('/run_all', methods=['POST'])
 def run_all_matrix():
+    """
+    Mode 2: Run All (Matrix).
+    Takes simple config (sessions), generates ALL combinations, and sends them.
+    """
     global_config = request.get_json() or {}
     sessions_count = global_config.get("sessions", 5)
 
@@ -75,6 +85,7 @@ def run_all_matrix():
 
     generated_jobs = []
 
+    # Loop through all options to create the matrix
     for os_name in os_options:
         for browser in browser_options:
             for algo in algo_options:
@@ -95,5 +106,6 @@ def health():
 
 
 if __name__ == "__main__":
-    print("Agent is running as a SERVER, waiting for POST requests from Bar on http://0.0.0.0:5000/run_experiment ...")
+    print("Agent is running as a SERVER.")
+    print("Endpoints: POST /run_experiment (Manual List), POST /run_all (Auto Matrix)")
     app.run(host="0.0.0.0", port=5000)
