@@ -4,13 +4,14 @@ import os
 import socket
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 from threading import Semaphore
 from urllib.parse import urlparse
 
 import requests
-from flask import Flask, request, json
-from flask import Response
+from flask import Flask, json
+from flask import Response, request
 
 # one-at-a-time per backend key
 _backend_slots = defaultdict(lambda: Semaphore(1))
@@ -20,8 +21,8 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=10)
 # Sniffer config (env-driven)
 SNIFFER_URL = os.getenv("SNIFFER_URL", "http://172.18.0.1:8080")
 SNIFFER_FILTER_MODE = "domain"
-SNIFFER_DOMAIN = "pq.cloudflareresearch.com"
 
+# Internal mapping for the sniffer API (which still expects integers)
 ALGO_NAME_TO_CODE = {"non-pqc": 0, "kyber": 1, "mlkem": 2}
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG").upper()
@@ -47,10 +48,6 @@ Containers = {
 
 TARGET_ENDPOINT = "/execute"
 TARGET_DONE_ENDPOINT = "/done"
-
-# map keys to values
-OS_MAP = {"0": "linux", "1": "windows", "2": "macos"}
-ALGO_MAP = {"0": "non-pqc", "1": "kyber", "2": "mlkem"}
 
 
 @app.get("/health")
@@ -94,22 +91,6 @@ def choose_container(opsys: str, algo: str) -> str:
 
     return key
 
-
-import json
-import logging
-import os
-import time
-from concurrent.futures import as_completed
-
-import requests
-from flask import Response, request
-
-# Assumed existing globals:
-# OS_MAP, ALGO_MAP, ALGO_NAME_TO_CODE, Containers, choose_container
-# _backend_slots, _EXECUTOR, _resolve_service_ip
-# SNIFFER_URL, SNIFFER_FILTER_MODE, SNIFFER_DOMAIN, TARGET_ENDPOINT
-
-
 # ==========================
 # Generic helper functions
 # ==========================
@@ -127,28 +108,20 @@ def get_first_present_value(mapping: dict, *keys):
 
 def normalize_operating_system(raw_value):
     """
-    Normalize OS name using OS_MAP.
-    Example: "0" -> "linux", "Linux" -> "linux", etc.
+    Normalize OS name. Must be a string (case-insensitive).
     """
     if raw_value is None:
         return None
-    lower_value = str(raw_value).strip().lower()
-    return OS_MAP.get(lower_value, lower_value)
+    return str(raw_value).strip().lower()
 
 
 def normalize_algorithm_name(raw_value):
     """
-    Normalize algorithm name using ALGO_MAP.
-    Example: "1" -> "kyber", "no-pqc" -> "non-pqc", etc.
+    Normalize algorithm name. Must be a string (case-insensitive).
     """
     if raw_value is None:
         return None
-
-    lower_value = str(raw_value).strip().lower()
-    if lower_value in {"nopqc", "no-pqc"}:
-        lower_value = "non-pqc"
-
-    return ALGO_MAP.get(lower_value, lower_value)
+    return str(raw_value).strip().lower()
 
 
 def normalize_browser_name(raw_value):
@@ -214,6 +187,7 @@ def parse_jobs_from_payload(request_payload: dict):
 
         browser_name = normalize_browser_name(raw_browser_value)
         algorithm_name = normalize_algorithm_name(raw_algorithm_value)
+        operating_system = normalize_operating_system(raw_os_value)
 
         logging.debug(
             "job[%d] raw -> os=%r browser=%r algo=%r sessions=%r",
@@ -225,8 +199,6 @@ def parse_jobs_from_payload(request_payload: dict):
         )
 
         try:
-            operating_system = normalize_operating_system(raw_os_value)
-
             if isinstance(raw_sessions_value, str):
                 raw_sessions_value = raw_sessions_value.strip()
             if raw_sessions_value is None or (isinstance(raw_sessions_value, str) and not raw_sessions_value.isdigit()):
@@ -241,15 +213,15 @@ def parse_jobs_from_payload(request_payload: dict):
 
         # Validation
         if operating_system not in {"linux", "windows", "macos"}:
-            parse_errors.append({"index": job_index, "error": "Invalid operating system"})
+            parse_errors.append({"index": job_index, "error": "Invalid operating system. Must be 'linux', 'windows', or 'macos'."})
             continue
 
         if browser_name not in {"chrome", "firefox"}:
-            parse_errors.append({"index": job_index, "error": "Invalid web browser"})
+            parse_errors.append({"index": job_index, "error": "Invalid web browser. Must be 'chrome' or 'firefox'."})
             continue
 
         if algorithm_name not in {"kyber", "mlkem", "non-pqc"}:
-            parse_errors.append({"index": job_index, "error": "Invalid algorithm"})
+            parse_errors.append({"index": job_index, "error": "Invalid algorithm. Must be 'non-pqc', 'kyber', or 'mlkem'."})
             continue
 
         if session_count <= 0:
@@ -297,7 +269,7 @@ def start_sniffer(job_definition: dict, backend_ip_address: str, maximum_wait_se
         "container_ip": backend_ip_address,
         "duration_sec": maximum_wait_seconds,
         "filter_mode": SNIFFER_FILTER_MODE,
-        "domain": SNIFFER_DOMAIN if SNIFFER_FILTER_MODE == "domain" else None,
+        "domain": "domain",
         "session_count": job_definition["sessions"],
     }
 
@@ -334,7 +306,7 @@ def start_sniffer(job_definition: dict, backend_ip_address: str, maximum_wait_se
             if "children" in sniffer_start_body:
                 children_entries = sniffer_start_body.get("children", [])
             elif "response" in sniffer_start_body and isinstance(
-                sniffer_start_body["response"], dict
+                    sniffer_start_body["response"], dict
             ):
                 children_entries = sniffer_start_body["response"].get("children", []) or []
 
@@ -383,10 +355,10 @@ def all_sessions_for_job_are_done(status_body: dict, session_ids: list[str]) -> 
 
 
 def poll_sniffer_until_done(
-    job_definition: dict,
-    session_ids: list[str],
-    poll_interval_seconds: float,
-    maximum_wait_seconds: float,
+        job_definition: dict,
+        session_ids: list[str],
+        poll_interval_seconds: float,
+        maximum_wait_seconds: float,
 ):
     """
     Poll sniffer /status until all session_ids are finished or timeout expires.
@@ -426,7 +398,7 @@ def poll_sniffer_until_done(
             sniffer_status_samples.append(sniffer_status_body)
 
         if isinstance(sniffer_status_body, dict) and all_sessions_for_job_are_done(
-            sniffer_status_body, session_ids
+                sniffer_status_body, session_ids
         ):
             logging.info(
                 "job[%d] sniffer reports this run's session_ids are done",
@@ -612,7 +584,7 @@ def run_single_job(job_definition: dict):
             backend_ip_address,
         )
 
-        # 1) Start sniffer
+        # Start sniffer
         sniffer_start_info, session_ids = start_sniffer(
             job_definition,
             backend_ip_address,
@@ -620,10 +592,10 @@ def run_single_job(job_definition: dict):
         )
         time.sleep(0.5)  # tiny wait to arm sniffer
 
-        # 2) Run sender
+        # Run sender
         sender_execute_info = execute_sender(job_definition)
 
-        # 3a) Early-stop path if sender says 'done'
+        # Early-stop path if sender says 'done'
         if sender_reports_done(sender_execute_info, stop_on_sender_done):
             logging.info(
                 "job[%d] sender reports status=done; stopping sniffer now",
@@ -659,7 +631,7 @@ def run_single_job(job_definition: dict):
                 },
             }
 
-        # 3b) Legacy polling path
+        # Legacy polling path
         sniffer_finished, sniffer_status_samples, elapsed_seconds = poll_sniffer_until_done(
             job_definition,
             session_ids,
@@ -667,7 +639,7 @@ def run_single_job(job_definition: dict):
             maximum_wait_seconds,
         )
 
-        # 4) Always call sniffer /done at the end (idempotent)
+        # Always call sniffer /done at the end (idempotent)
         sniffer_done_info = stop_sniffer(
             job_definition,
             backend_ip_address,

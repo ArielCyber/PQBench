@@ -39,7 +39,6 @@ services:
       URL_MACOS_KYBER: "http://macos-kyber:5000"
       URL_MACOS_MLKEM: "http://macos-mlkem:5000"
       LOG_LEVEL: ${LOG_LEVEL}
-      SNIFFER_DOMAIN: "pq.cloudflareresearch.com"
     healthcheck:
       test: [ "CMD", "curl", "-fsS", "http://localhost:5000/health" ]
       interval: 60s

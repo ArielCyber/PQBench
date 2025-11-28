@@ -1,10 +1,10 @@
-import os
-import requests
 import json
-from flask import Flask, request, jsonify, app
-from datetime import datetime
 import logging
+import os
 import time
+
+import requests
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
@@ -29,18 +29,18 @@ def save_config_to_file(config, filename="last_sent_config.json"):
         logging.warning(f"Could not save config file: {e}")
 
 
-def send_config_to_switcher(config_from_bar):
+def send_config_to_switcher(framework_config):
     """
-    Forwards *one* configuration received from Bar to the switcher.
+    Forwards *one* configuration received from the framework to the switcher.
     """
     logging.info(f"Forwarding config to switcher:")
-    logging.debug(json.dumps(config_from_bar, indent=2))
+    logging.debug(json.dumps(framework_config, indent=2))
 
-    save_config_to_file(config_from_bar)
+    save_config_to_file(framework_config)
 
     try:
-        # Send the config we received from Bar to the switcher
-        response = requests.post(ENTRY_CONTROLLER_URL, json=config_from_bar, timeout=10)
+        # Send the config we received from the framework to the switcher
+        response = requests.post(ENTRY_CONTROLLER_URL, json=framework_config, timeout=10)
         logging.info(f"Switcher response: {response.status_code}")
 
         try:
@@ -64,7 +64,7 @@ def send_config_to_switcher(config_from_bar):
 @app.route('/run_experiment', methods=['POST'])
 def handle_experiment_request():
     """
-    This is the endpoint that Bar's framework will POST to.
+    This is the endpoint that the general framework will POST to.
     It receives a LIST of experiment JSONs and forwards them
     to the switcher *one by one*.
     """
@@ -75,7 +75,7 @@ def handle_experiment_request():
         logging.warning("Request received with no JSON list payload.")
         return jsonify({"error": "Payload must be a non-empty list (array) of experiment objects."}), 400
 
-    logging.info(f"Received a batch of {len(experiments_list)} experiments from Bar. Starting to process...")
+    logging.info(f"Received a batch of {len(experiments_list)} experiments from the framework. Starting to process...")
 
     results = []
 
@@ -116,7 +116,7 @@ def health():
 
 
 if __name__ == "__main__":
-    print("Agent is running as a SERVER, waiting for POST requests from Bar on http://0.0.0.0:5000/run_experiment ...")
+    print("Agent is running as a SERVER, waiting for POST requests from the framework on http://0.0.0.0:5000/run_experiment ...")
     app.run(host="0.0.0.0", port=5000)
 
 

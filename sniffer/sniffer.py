@@ -481,8 +481,20 @@ def _create_output_directories(code: str, timestamp: str, ip: str) -> tuple[str,
     """
     Creates output directories and returns the child directory and output file path.
     """
+    if not os.path.exists(OUTPUT_ROOT):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Configuration Error: OUTPUT_ROOT '{OUTPUT_ROOT}' does not exist or is not mounted."
+        )
+
     child_dir = os.path.join(OUTPUT_ROOT, code, f"session-{timestamp}")
-    os.makedirs(child_dir, exist_ok=True)
+
+    try:
+        os.makedirs(child_dir, exist_ok=True)
+    except OSError as e:
+        log.error(f"Failed to create directory {child_dir}: {e}")
+        raise HTTPException(status_code=500, detail=f"File system error: {e}")
+
     outfile = os.path.join(child_dir, f"raw.pcap")
     return child_dir, outfile
 

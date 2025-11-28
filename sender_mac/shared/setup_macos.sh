@@ -691,8 +691,8 @@ main() {
   _info "Processor will also (re)start via LaunchAgent on login."
 #  _info "Stopping background service to run in foreground..."
 #  launchctl unload "${LA_DIR}/${APP_ID}.plist" >/dev/null 2>&1 || true
-#  _info "Starting processor.py now..."
-#  "${RUNNER}"
+  _info "Starting processor.py now..."
+  "${RUNNER}"
 }
 
 
