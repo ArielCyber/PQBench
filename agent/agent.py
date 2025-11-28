@@ -71,30 +71,47 @@ def handle_experiment_request():
 @app.route('/run_all', methods=['POST'])
 def run_all_matrix():
     """
-    Mode 2: Run All (Matrix).
-    Takes simple config (sessions), generates ALL combinations, and sends them.
+    Smart Matrix Mode:
+    1. Takes the base config.
+    2. Checks which parameters are missing (OS, Browser, Algo).
+    3. Completes ALL combinations only for the missing parameters.
     """
-    global_config = request.get_json() or {}
-    sessions_count = global_config.get("sessions", 5)
+    base_config = request.get_json() or {}
+    
+    logging.info(f"Generating matrix based on config: {base_config}")
 
-    logging.info(f"Generating matrix for ALL combinations with sessions={sessions_count}...")
+    if "os" in base_config:
+        target_os_list = [base_config["os"]]
+    else:
+        target_os_list = ["linux", "windows", "macos"]
 
-    os_options = ["linux", "windows", "macos"]
-    browser_options = ["chrome", "firefox"]
-    algo_options = ["kyber", "mlkem"] 
+
+    if "browser" in base_config:
+        target_browser_list = [base_config["browser"]]
+    else:
+        target_browser_list = ["chrome", "firefox"]
+
+    if "algorithm" in base_config:
+        target_algo_list = [base_config["algorithm"]]
+    else:
+        target_algo_list = ["kyber", "mlkem"]
+        
+    if "sessions" not in base_config:
+        base_config["sessions"] = 5
 
     generated_jobs = []
 
-    # Loop through all options to create the matrix
-    for os_name in os_options:
-        for browser in browser_options:
-            for algo in algo_options:
-                generated_jobs.append({
-                    "os": os_name,
-                    "browser": browser,
-                    "algorithm": algo,
-                    "sessions": sessions_count
-                })
+    for os_name in target_os_list:
+        for browser in target_browser_list:
+            for algo in target_algo_list:
+
+                job = base_config.copy()
+                
+                job["os"] = os_name
+                job["browser"] = browser
+                job["algorithm"] = algo
+                
+                generated_jobs.append(job)
 
     full_payload = {"jobs": generated_jobs}
     return send_batch_to_switcher(full_payload)
