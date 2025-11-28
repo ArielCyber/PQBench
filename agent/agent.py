@@ -68,7 +68,7 @@ def handle_experiment_request():
     return send_batch_to_switcher(batch_payload)
 
 
-@app.route('/run_all', methods=['POST'])
+@app.route('/all', methods=['POST'])
 def run_all_matrix():
     """
     Smart Matrix Mode:
