@@ -1,13 +1,33 @@
+version: "3.8"
+
+x-env-macos: &env_macos
+  HEADLESS: "1"           # built-in web viewer
+  QEMU_AUDIO_DRV: "none"
+  VERSION: "14"
+  RAM_SIZE: "6G"
+  CPU_CORES: "2"
+  DISK_SIZE: "64G"
+
+x-macos-common: &macos_common
+  image: dockurr/macos
+  privileged: true
+  devices:
+    - /dev/kvm
+    - /dev/net/tun
+  cap_add:
+    - NET_ADMIN
+  restart: unless-stopped
+  stop_grace_period: 2m
+
 services:
   switcher:
     build: ./switcher
     image: switcher:latest
     container_name: switcher_container
     command: >
-      gunicorn -w 2 -k gthread --threads 4 -t 0 -b 0.0.0.0:5000 
+      gunicorn -w 2 -k gthread --threads 4 -t 0 -b 0.0.0.0:5000
       --access-logfile - --error-logfile -
       switcher:app
-    # -t 0 = no gunicorn timeout kill
     ports: [ "5000:5000" ]
     environment:
       # Be careful of changing the container names - the URLs are dependent on them
@@ -16,10 +36,10 @@ services:
       URL_LINUX_MLKEM: "http://linux-mlkem:5000"
       URL_WINDOWS_KYBER: "http://win-kyber:5000"
       URL_WINDOWS_MLKEM: "http://win-mlkem:5000"
+      URL_MACOS_KYBER: "http://macos-kyber:5000"
+      URL_MACOS_MLKEM: "http://macos-mlkem:5000"
       LOG_LEVEL: ${LOG_LEVEL}
-      # add the rest when they are ready
       SNIFFER_DOMAIN: "pq.cloudflareresearch.com"
-
     healthcheck:
       test: [ "CMD", "curl", "-fsS", "http://localhost:5000/health" ]
       interval: 60s
@@ -29,18 +49,14 @@ services:
     networks: [appnet]
 
   linux-kyber:
-    shm_size: "1g"        # << big shared memory helps Chrome a lot
-    ulimits:
-      nofile:
-        soft: 65535
-        hard: 65535
+    shm_size: "1g"
+    ulimits: { nofile: { soft: 65535, hard: 65535 } }
     build:
       context: ./sender_linux
       dockerfile: Dockerfile_Linux_Kyber
     container_name: linux-kyber
     restart: unless-stopped
-    ports:
-      - "5001:5000"
+    ports: [ "5001:5000" ]
     networks: [appnet]
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:5000/health || curl -fsS http://localhost:5000/ || exit 1" ]
@@ -50,18 +66,14 @@ services:
       start_period: 5s
 
   linux-mlkem:
-    shm_size: "1g"        # << big shared memory helps Chrome a lot
-    ulimits:
-      nofile:
-        soft: 65535
-        hard: 65535
+    shm_size: "1g"
+    ulimits: { nofile: { soft: 65535, hard: 65535 } }
     build:
       context: ./sender_linux
       dockerfile: Dockerfile_Linux_MLKEM
     container_name: linux-mlkem
     restart: unless-stopped
-    ports:
-      - "5002:5000"
+    ports: [ "5002:5000" ]
     networks: [appnet]
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:5000/health || curl -fsS http://localhost:5000/ || exit 1" ]
@@ -82,19 +94,16 @@ services:
 
 
   sniffer:
-    build:
-      context: ./sniffer
+    build: { context: ./sniffer }
     container_name: sniffer_container
     command: uvicorn sniffer:app --host 0.0.0.0 --port 8080
     network_mode: "host"
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
+    cap_add: [ "NET_ADMIN", "NET_RAW" ]
     restart: unless-stopped
     environment:
       LOG_LEVEL: ${LOG_LEVEL}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # to inspect/exec into other containers
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./output:/output
     healthcheck:
       test: [ "CMD", "curl", "-fsS", "http://localhost:8080/health" ]
@@ -102,6 +111,7 @@ services:
       timeout: 3s
       retries: 5
 
+  # ------------------ WINDOWS VMs ------------------
   # Estimated first install + boot time - 20~ minutes
   # Estimated non first time startup - 1.5~ minutes
   # Windows VM that will run the windows processor
@@ -114,44 +124,34 @@ services:
       RAM_SIZE: "6G"
       DISK_SIZE: "40G"
       CPU_CORES: "2"
-      USERNAME: "Docker"      # default user (can change)
-      PASSWORD: "admin"       # default pass (can change)
-      # Optional: give Windows its own L2 IP later (see macvlan note)
-      # DHCP: "Y"
-      ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to work : https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
-    devices:
-      - /dev/kvm
-      - /dev/net/tun
-    cap_add:
-      - NET_ADMIN
+      USERNAME: "Docker"
+      PASSWORD: "admin"
+      ARGUMENTS: "-cpu host,arch_capabilities=off"
+    devices: [ "/dev/kvm", "/dev/net/tun" ]
+    cap_add: [ "NET_ADMIN" ]
     ports:
-      - "8006:8006"           # web viewer (install phase / emergency)
-      - "5003:5000"           # Flask inside Windows -> exposed as 5001 on host/network
+      - "8006:8006"
+      - "5003:5000"
     volumes:
-      - ./sender_windows/oem/kyber:/oem      # auto-run installer at first boot
-      - ./sender_windows/:/data              # shows up inside Windows as \\host.lan\Data
+      - ./sender_windows/oem/kyber:/oem
+      - ./sender_windows/:/data
       - ./sender_windows/windows-kyber:/storage
-
     restart: unless-stopped
     stop_grace_period: 2m
     networks: [appnet]
 
-  # Windows VM that will run the windows processor
   win-mlkem:
     image: dockurr/windows
     container_name: win-mlkem
     environment:
       VERSION: "2025"
-      RAM_SIZE: "6G"
       EDITION: "core"
+      RAM_SIZE: "6G"
       DISK_SIZE: "40G"
       CPU_CORES: "2"
-      ARGUMENTS: "-cpu host,arch_capabilities=off" # MUST for Windows 11 to boot consistently: https://github.com/dockur/windows/issues/1301#issuecomment-3062008123
-    devices:
-      - /dev/kvm
-      - /dev/net/tun
-    cap_add:
-      - NET_ADMIN
+      ARGUMENTS: "-cpu host,arch_capabilities=off"
+    devices: [ "/dev/kvm", "/dev/net/tun" ]
+    cap_add: [ "NET_ADMIN" ]
     ports:
       - "8007:8006"
       - "5004:5000"
@@ -159,19 +159,84 @@ services:
       - ./sender_windows/oem/mlkem:/oem
       - ./sender_windows/:/data
       - ./sender_windows/windows-mlkem:/storage
-
     restart: unless-stopped
     stop_grace_period: 2m
     networks: [appnet]
+
+  # ------------------ macOS VMs ------------------
+  macos-kyber:
+    <<: *macos_common
+    container_name: macos-kyber
+
+    environment:
+      <<: *env_macos         # your existing env anchor, if you have one
+      MODE: "KYBER"
+      RAM_SIZE: "4G"
+      CPU_CORES: "2"
+      DISK_SIZE: "40G"
+      HEADLESS: "1"
+      QEMU_AUDIO_DRV: "none"
+      USER_PORTS: "5000"     # forward guest :5000 → container :5000
+
+    volumes:
+      - ./sender_mac/macos-kyber:/storage   # VM disks/NVRAM
+      - ./sender_mac/shared:/shared         # shared folder into macOS
+
+    ports:
+      - "8008:8006"           # web viewer
+      - "5901:5900/tcp"       # VNC (optional)
+      - "5901:5900/udp"
+      - "5005:5000"           # host 5005 → container 5000 → macOS 5000
+
+    networks: [ appnet ]
+
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:5000/health || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 20
+      start_period: 15m
+
+
+
+  macos-mlkem:
+    <<: *macos_common
+    container_name: macos-mlkem
+    environment:
+      <<: *env_macos
+      MODE: "MLKEM"
+      RAM_SIZE: "4G"
+      CPU_CORES: "2"
+      DISK_SIZE: "40G"
+      HEADLESS: "1"
+      QEMU_AUDIO_DRV: "none"
+      USER_PORTS: "5000"     # forward guest :5000 → container :5000
+
+    volumes:
+      - ./sender_mac/macos-mlkem:/storage
+      - ./sender_mac/shared:/shared
+
+    ports:
+      - "8009:8006"
+      - "5902:5900/tcp"
+      - "5902:5900/udp"
+      - "5006:5000"
+
+    networks: [appnet]
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:5000/health || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 20
+      start_period: 15m
 
 networks:
   appnet:
     name: shared-appnet
     driver: bridge
-    # Gives the bridge a stable, known name so the sniffer can target it.
     driver_opts:
       com.docker.network.bridge.name: pqbench0
     ipam:
       config:
-        - subnet: 172.18.0.0/24 # The first 24 bits are for the network, the last 8 are for the host
+        - subnet: 172.18.0.0/24
           gateway: 172.18.0.1
