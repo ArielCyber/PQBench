@@ -9,10 +9,10 @@ from dataclasses import dataclass
 
 class TargetSpec(BaseModel):
     # recording identity (governs folder code)
-    os: constr(strip_whitespace=True) = Field(description="linux/windows/macos")
-    browser: constr(strip_whitespace=True) = Field(description="chrome/firefox")
-    algo: int = Field(ge=0, le=2, description="0=Non-PQC, 1=Kyber, 2=MLKEM")
-    session_count: int = Field(1, ge=1, le=1000, description="Number of independent recordings to make")
+    os: Literal["linux", "windows", "macos"]
+    browser: Literal["chrome", "firefox"]
+    algorithm: Literal["non-pqc", "kyber", "mlkem"]
+    session: int = Field(1, ge=1, le=1000, description="Number of independent recordings to make")
 
     # capture identity
     container_ip: IPvAnyAddress
@@ -47,12 +47,11 @@ class ChildSession:
     bpf: str
     started_at: float
     duration_sec: int
-    session_count: int = 1
+    session: int = 1         # Renamed from session_count to match input
     done: bool = False
     packets: int = 0
     error: Optional[str] = None
 
-    # NEW: progress telemetry updated by _monitor_progress
     qualified_streams: int = 0  # how many streams meet CH+SH+min_packets(+appdata)
     qualified_target: int = 0  # copy of session_count so we can expose it
     qualified_reached: bool = False  # set True once we hit/stabilize target

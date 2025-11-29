@@ -231,7 +231,7 @@ def parse_jobs_from_payload(request_payload: dict):
         try:
             target_container_key = choose_container(operating_system, algorithm_name)
             target_base_url = Containers[target_container_key].rstrip("/")
-            algorithm_code = ALGO_NAME_TO_CODE[algorithm_name.lower()]  # int 0/1/2
+            algorithm_code = ALGO_NAME_TO_CODE[algorithm_name]  # int 0/1/2
         except Exception as container_exception:
             parse_errors.append({"index": job_index, "error": str(container_exception)})
             continue
@@ -265,12 +265,11 @@ def start_sniffer(job_definition: dict, backend_ip_address: str, maximum_wait_se
     start_sniffer_payload = {
         "os": job_definition["opsys"],
         "browser": job_definition["browser"],
-        "algo": job_definition["algo_code"],
+        "algorithm": job_definition["algo_name"],
         "container_ip": backend_ip_address,
         "duration_sec": maximum_wait_seconds,
-        "filter_mode": SNIFFER_FILTER_MODE,
-        "domain": "domain",
-        "session_count": job_definition["sessions"],
+        "domain": "pq.cloudflareresearch.com",
+        "session": job_definition["sessions"],
     }
 
     # Remove None values

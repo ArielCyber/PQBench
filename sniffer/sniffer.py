@@ -21,9 +21,7 @@ from shutil import which
 PQBench Sniffer: FastAPI microservice for capturing PCAPs inside a container.
 
 Exposes /start, /status, /ifaces, and /health endpoints. Uses Scapy (libpcap)
-to capture packets, builds BPF filters from several modes (none/domain/cidr/
-ranges/custom), can intersect with TCP ports, and optionally splits TCP streams
-with tshark into per-stream PCAPs.
+to capture packets.
 """
 
 
@@ -46,12 +44,11 @@ async def lifespan(app: FastAPI):
             still_running = [sid for sid, cs in _sessions.items() if not cs.done]
         if still_running:
             log.warning("Shutdown with %d active sessions: %s", len(still_running), still_running)
-            # If you added stop-events/handles, you could signal them here.
     except Exception as e:
         log.exception("Shutdown cleanup failed: %s", e)
 
 
-app = FastAPI(title="PQBench Sniffer", version="0.1.2", lifespan=lifespan)
+app = FastAPI(title="PQBench Sniffer", version="0.1.3", lifespan=lifespan)
 
 # --------- Logging ----------
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG").upper()
@@ -84,14 +81,6 @@ _last_parent = {"session_dir": None, "children": []}
 def _resolve_domain_ips(hostname: str) -> tuple[list[str], list[str]]:
     """
     Resolve a domain to unique IPv4/IPv6 addresses.
-
-    Parameters:
-        hostname: The FQDN to resolve.
-    Returns:
-        A tuple ``(v4_list, v6_list)`` of unique IP strings.
-
-    Notes:
-        Resolution errors are logged and result in empty lists.
     """
     log.debug("_resolve_domain_ips(): resolving %r", hostname)
     v4s: List[str] = []
@@ -117,20 +106,6 @@ def _resolve_domain_ips(hostname: str) -> tuple[list[str], list[str]]:
 def _build_domain_bpf(container_ip: str, domain_v4: List[str], domain_v6: List[str]) -> str:
     """
     Build a bidirectional BPF limited to a container IP and a domain's IPs.
-
-    Produces a filter of the form:
-    ``(host <container_ip>) and ((ip and (...v4...)) or (ip6 and (...v6...)))``.
-
-    Args:
-        container_ip: Target container IP.
-        domain_v4: IPv4 addresses resolved for the domain.
-        domain_v6: IPv6 addresses resolved for the domain.
-
-    Returns:
-        A BPF string.
-
-    Notes:
-        If no IPs are provided, falls back to ``ip or ip6`` to avoid an empty filter.
     """
     log.debug("_build_domain_bpf(): container=%s v4=%s v6=%s", container_ip, domain_v4, domain_v6)
     v4_parts = [f"(dst host {ip} or src host {ip})" for ip in domain_v4]
@@ -149,58 +124,36 @@ def _build_domain_bpf(container_ip: str, domain_v4: List[str], domain_v6: List[s
     return bpf
 
 
-def name_dir(os_name: str, browser: str, algo: int) -> str:
+def name_dir(os_name: str, browser: str, algorithm: str) -> str:
     """
-    Encode OS, browser, and algorithm into a 3-digit session code.
-
-    Mapping:
-        OS: linux=1, windows=2, macos=3
-        Browser: firefox=1, chrome=2
-        Algo: Non-PQC=0, Kyber=1, MLKEM=2
-
-    Args:
-        os_name: OS label.
-        browser: Browser label.
-        algo: Algorithm code.
-
-    Returns:
-        A three-character string like ``"121"``.
-
-    Raises:
-        ValueError: If an unsupported OS or browser label is provided.
+    Encode OS, browser, and algorithm into a directory string.
+    Expects string inputs now (no int mapping).
     """
 
     os_name = os_name.lower()
-    if os_name != "linux" and os_name != "windows" and os_name != "macos":
+    if os_name not in ["linux", "windows", "macos"]:
         log.error(f"name_dir invalid os: {os_name}")
         raise ValueError(f"Invalid input: {os_name}")
 
     browser = browser.lower()
-    if browser != "firefox" and browser != "chrome":
+    if browser not in ["firefox", "chrome"]:
         log.error(f"name_dir invalid browser: {browser}")
         raise ValueError(f"Invalid input: {browser}")
 
-    algo_map = {0: "non-pqc", 1: "kyber", 2: "mlkem"}
-    algo_name = algo_map.get(algo)
-    if algo_name is None:
-        log.error(f"name_dir invalid algo: {algo}")
-        raise ValueError(f"Invalid input: {algo}")
+    algorithm = algorithm.lower()
+    # Validate against known types
+    if algorithm not in ["non-pqc", "kyber", "mlkem"]:
+        log.error(f"name_dir invalid algorithm: {algorithm}")
+        raise ValueError(f"Invalid input: {algorithm}")
 
-    code = f"{os_name}_{browser}_{algo_name}"
-    log.debug(f"name_dir -> os={os_name} browser={browser} algo={algo_name} => {code}")
+    code = f"{os_name}_{browser}_{algorithm}"
+    log.debug(f"name_dir -> os={os_name} browser={browser} algo={algorithm} => {code}")
     return code
 
 
 def _and_ports(bpf: str, ports_csv: Optional[str]) -> str:
     """
     AND a TCP port clause with an existing BPF, if ports were supplied.
-
-    Args:
-        bpf: Base BPF string.
-        ports_csv: Comma-separated TCP ports (e.g., ``"443,80"``).
-
-    Returns:
-        The combined BPF. If ``ports_csv`` is empty/invalid, returns the original ``bpf``.
     """
     if not ports_csv:
         return bpf
@@ -216,26 +169,14 @@ def _and_ports(bpf: str, ports_csv: Optional[str]) -> str:
 
 def _split_streams_tshark(input_pcap: str, output_dir: str, dir_code, timestamp, *, min_packets: int = 30,
                           require_serverhello: bool = True, require_appdata: bool = False,
-                          force_tls_port: str | None = "443", ):  # set None to skip decode-as
+                          force_tls_port: str | None = "443", ):
     """
     Split only the *meaningful* TLS TCP streams from a PCAP using tshark.
-
-    Rules:
-      - Stream must contain a ClientHello (tls.handshake.type==1)
-      - If require_serverhello: must also contain a ServerHello (type==2)
-      - Stream must have >= min_packets TCP frames
-      - If require_appdata: must contain TLS application data (content_type==23)
-
-    Outputs:
-      <output_dir>/stream-<sid>.pcap for each kept stream
-      <output_dir>/_streams_debug.json with selection reasons
     """
 
     try:
         log.info("Starting stream split for %s", input_pcap)
         os.makedirs(output_dir, exist_ok=True)
-        # dbg is just a debug information accumulator — a dictionary that collects
-        # all the reasoning about which streams were kept or dropped and why.
         dbg = {
             "input": input_pcap,
             "min_packets": min_packets,
@@ -259,7 +200,7 @@ def _split_streams_tshark(input_pcap: str, output_dir: str, dir_code, timestamp,
             decode = ["-d", f"tcp.port=={force_tls_port},ssl"]
             step("decode-as", args=decode)
 
-        # Find all streams that contain a ClientHello (candidate set)
+        # Find all streams that contain a ClientHello
         cmd_ch = ["tshark", "-r", input_pcap, *decode,
                   "-Y", "tls.handshake.type==1",
                   "-T", "fields", "-e", "tcp.stream"]
@@ -316,11 +257,10 @@ def _split_streams_tshark(input_pcap: str, output_dir: str, dir_code, timestamp,
         # Extract kept streams
         index = 0
         for sid in kept_ids:
-            basename = f"session-{dir_code}-{timestamp}-{index:02d}.pcap"  # <-- no leading slash
-            stream_out = os.path.join(output_dir, basename)  # <-- proper join
+            basename = f"session-{dir_code}-{timestamp}-{index:02d}.pcap"
+            stream_out = os.path.join(output_dir, basename)
             index += 1
 
-            # extra safety: ensure parent exists (in case output_dir was changed upstream)
             os.makedirs(os.path.dirname(stream_out), exist_ok=True)
 
             cmd_extract = [
@@ -332,7 +272,6 @@ def _split_streams_tshark(input_pcap: str, output_dir: str, dir_code, timestamp,
             log.debug("Extracting stream %s -> %s | cmd=%s", sid, stream_out, " ".join(cmd_extract))
             subprocess.run(cmd_extract, check=False)
 
-        # Persist debug info
         with open(os.path.join(output_dir, "_streams_debug.json"), "w", encoding="utf-8") as f:
             json.dump(dbg, f, indent=2)
 
@@ -345,16 +284,8 @@ def _split_streams_tshark(input_pcap: str, output_dir: str, dir_code, timestamp,
     except Exception as e:
         log.exception(f"Unexpected error during stream split: {e}")
 
-    log.info("Completed stream split: kept=%d dropped=%d",
-             len(dbg["kept"]), len(dbg["dropped"]))
-
 
 def _resolve_ip_from_url(url: str) -> str:
-    """
-    Converts given URL to an IPv4 address.
-    :param url: URL to resolve
-    :return: IPv4 address
-    """
     host = urlparse(url).hostname
     if not host:
         raise ValueError(f"Invalid url: {url}")
@@ -362,15 +293,6 @@ def _resolve_ip_from_url(url: str) -> str:
 
 
 def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | None = None):
-    """
-    This function is responsible for capturing the network traffic
-    defined by the child session's BPF,
-    :param session_id: the session ID
-    :param duration: the duration of the capture
-    :param timestamp: the timestamp of the capture
-    :param armed_evt: an Event or None
-    :return: None
-    """
     child_session = _sessions.get(session_id)
     if not child_session:
         return
@@ -387,31 +309,22 @@ def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | N
         if armed_evt is not None:
             armed_evt.set()  # signal: sniffer armed
 
-        # # Wait until duration elapses OR someone calls /done (stop_evt.set())
-        # if stop_evt is not None:
-        #     stop_evt.wait(timeout=duration)
-        # else:
-        #     time.sleep(duration)
-
         # Monitor + wait: stop event OR duration
         poll_log_interval = 30  # seconds
         last_size = -1
         start_time = time.time()
 
         while True:
-            # check stop event
             if stop_evt is not None and stop_evt.is_set():
                 log.info("[%s] stop_evt detected → stopping sniffer", session_id)
                 break
 
-            # check timeout
             elapsed = time.time() - start_time
             if elapsed >= duration:
                 log.info("[%s] duration reached (elapsed=%.1fs / duration=%.1fs) → stopping sniffer",
                          session_id, elapsed, duration)
                 break
 
-            # file growth debug
             if os.path.exists(child_session.outfile):
                 size = os.path.getsize(child_session.outfile)
                 if size != last_size:
@@ -453,24 +366,18 @@ def _capture_job(session_id: str, duration: int, timestamp, armed_evt: Event | N
 
 
 def _validate_targets(targets: list) -> None:
-    """
-    Validates that the targets list is not empty.
-    """
     if not targets:
         raise HTTPException(status_code=400, detail="targets must be non-empty")
 
 
 def _generate_session_code(target) -> str:
     """
-    Generates a session code based on OS, browser, and algorithm.
+    Generates a session code based on OS, browser, and algorithm (string).
     """
-    return name_dir(target.os, target.browser, target.algo)
+    return name_dir(target.os, target.browser, target.algorithm)
 
 
 def _validate_interface(iface: str) -> None:
-    """
-    Validates if the specified interface exists.
-    """
     if iface != "any":
         visible = set(get_if_list())
         if iface not in visible:
@@ -478,9 +385,6 @@ def _validate_interface(iface: str) -> None:
 
 
 def _create_output_directories(code: str, timestamp: str, ip: str) -> tuple[str, str]:
-    """
-    Creates output directories and returns the child directory and output file path.
-    """
     if not os.path.exists(OUTPUT_ROOT):
         raise HTTPException(
             status_code=500,
@@ -501,35 +405,24 @@ def _create_output_directories(code: str, timestamp: str, ip: str) -> tuple[str,
 
 def _build_bpf_filter(target, ip: str) -> str:
     """
-    Builds the BPF filter string based on the target's filter mode.
+    Builds the BPF filter string.
+    Removed explicit filter_mode checks; defaults to domain filtering.
     """
-    if target.filter_mode == "none":
-        bpf = f"(host {ip}) and (ip or ip6)"
-    elif target.filter_mode == "domain":
-        if not target.domain:
-            raise HTTPException(status_code=400, detail="domain required when filter_mode=domain")
-        v4s, v6s = _resolve_domain_ips(target.domain)
-        if not (v4s or v6s):
-            raise HTTPException(status_code=424, detail=f"No A/AAAA records resolved for {target.domain}")
-        bpf = _build_domain_bpf(ip, v4s, v6s)
-    elif target.filter_mode == "custom":
-        if not target.custom_bpf:
-            raise HTTPException(status_code=400, detail="custom_bpf required when filter_mode=custom")
-        bpf = f"(host {ip}) and ({target.custom_bpf})"
-    else:
-        raise HTTPException(status_code=400, detail="unknown filter_mode")
+    # Always attempt to resolve domain IPs
+    v4s, v6s = _resolve_domain_ips(target.domain)
+
+    # Even if resolution returns empty (fallback inside _build_domain_bpf),
+    # we construct the BPF based on the domain logic + container IP.
+    bpf = _build_domain_bpf(ip, v4s, v6s)
+
     return _and_ports(bpf, target.ports)
 
 
 def _register_and_start_session(sid: str, cs: ChildSession, duration: int, timestamp: str) -> None:
-    """
-    Registers the child session, creates a stop event, and starts the capture job in a new thread.
-    """
     with _lock:
         _sessions[sid] = cs
         _stop_events[sid] = Event()
 
-    # Start thread and wait until "armed"
     armed = Event()
     threading.Thread(target=_capture_job, args=(sid, duration, timestamp, armed), daemon=True).start()
     if not armed.wait(timeout=2.0):
@@ -537,10 +430,6 @@ def _register_and_start_session(sid: str, cs: ChildSession, duration: int, times
 
 
 def _start_single_target(target, timestamp: str, seen: set) -> dict | None:
-    """
-    Starts a single capture session for a given target.
-    Helper for start_batch.
-    """
     code = _generate_session_code(target)
     ip = str(target.container_ip)
     key = (ip, code)
@@ -555,7 +444,6 @@ def _start_single_target(target, timestamp: str, seen: set) -> dict | None:
     child_dir, outfile = _create_output_directories(code, timestamp, ip)
     bpf = _build_bpf_filter(target, ip)
 
-    # Register session
     sid = uuid.uuid4().hex[:12]
     cs = ChildSession(
         session_id=sid,
@@ -567,8 +455,8 @@ def _start_single_target(target, timestamp: str, seen: set) -> dict | None:
         bpf=bpf,
         started_at=time.time(),
         duration_sec=target.duration_sec,
-        session_count=getattr(target, "session_count", 1),
-        qualified_target=int(getattr(target, "session_count", 1)),
+        session=getattr(target, "session", 1),  # Changed to session
+        qualified_target=int(getattr(target, "session", 1)),  # Changed to session
     )
 
     _register_and_start_session(sid, cs, target.duration_sec, timestamp)
@@ -578,20 +466,12 @@ def _start_single_target(target, timestamp: str, seen: set) -> dict | None:
 
 @app.post("/start", response_model=StartResponseMulti)
 def start_batch(request: StartBatchRequest):
-    """
-    This function is responsible for starting a batch of sessions.
-    It builds the BPF, arms the thread and creates the output directory.
-    :param request: StartBatchRequest object
-    :return: StartResponseMulti object
-    """
     log.debug("/start (batch) called: %s", request.model_dump())
     _validate_targets(request.targets)
 
-    # one UTC timestamp shared by this batch for easy grouping inside each code
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
 
     children: list[dict] = []
-    # de-dupe by (ip, code) to avoid double-sniffing the exact same thing in one call
     seen: set[tuple[str, str]] = set()
 
     for target in request.targets:
@@ -604,23 +484,11 @@ def start_batch(request: StartBatchRequest):
 
 @app.get("/health")
 def health():
-    """
-    Liveness/readiness probe endpoint.
-
-    Returns:
-        ``{"ok": True}`` when the service is up.
-    """
     return "ok", 200
 
 
 @app.get("/ifaces")
 def list_ifaces() -> List[str]:
-    """
-    Return the list of interfaces visible inside the container.
-
-    Returns:
-        A list of interface names (e.g., ``["lo", "eth0"]``).
-    """
     ifaces = get_if_list()
     log.debug(f"/ifaces -> {ifaces}")
     return ifaces
@@ -641,8 +509,6 @@ def status():
 def done(req: DoneRequest = Body(...)):
     """
     Stop all active sessions that match the given container.
-    Priority: container_ip (if provided) > resolve from url.
-    Returns a list of session_ids that were signaled to stop.
     """
     try:
         if req.container_ip:

@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import time
 
 import requests
 from flask import Flask, request, jsonify
@@ -96,13 +95,13 @@ def run_all_matrix():
     else:
         target_algo_list = ["kyber", "mlkem", "non-pqc"]
 
-    # 4. Sessions default
+    # Sessions default
     if "sessions" not in base_config:
         base_config["sessions"] = 5
 
     generated_jobs = []
 
-    # 5. Generate Matrix
+    # Generate Matrix
     for os_name in target_os_list:
         for browser in target_browser_list:
             for algo in target_algo_list:

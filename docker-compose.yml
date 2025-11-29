@@ -88,6 +88,7 @@ services:
     container_name: agent_container
     environment:
       ENTRY_CONTROLLER_URL: "http://switcher:5000/config"
+    ports: [ "4999:5000" ]
     restart: unless-stopped
     networks: [appnet]
 
