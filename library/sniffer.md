@@ -1,142 +1,88 @@
-# PQBench Sniffer Service
+# Sniffer Service
 
-## Overview
-The **PQBench Sniffer** is a FastAPI-based microservice designed to capture, filter, and post-process network traffic within containerized environments. It utilizes `scapy` for packet capture and `tshark` for post-processing stream separation.
+The Sniffer is a specialized microservice responsible for capturing, filtering, and post-processing network traffic. It is designed to run in a privileged container with access to the host network or a shared bridge, allowing it to record traffic from other containers.
 
-The service is designed to handle multiple concurrent capture sessions, each targeting specific container IPs, employing custom BPF filters, and automatically organizing output based on OS, Browser, and Cryptographic Algorithm identifiers.
+# Overview
 
-## Project Structure
+The service performs two main functions:
+1.  **Packet Capture (Live):** Uses `Scapy` (libpcap) to record traffic matching specific BPF filters (e.g., `host 172.18.0.5 and port 443`) into a raw PCAP file.
+2.  **Stream Splitting (Post-Process):** Uses `tshark` (Wireshark CLI) to analyze the raw PCAP and extract individual valid TLS sessions into separate files.
 
-* **`sniffer.py`**: The core application entry point. Contains the FastAPI app, threading logic, Scapy integration, and Tshark stream splitting logic.
-* **`sessions.py`**: Contains Pydantic models (`TargetSpec`, `StartBatchRequest`) and Data Classes (`ChildSession`) used for type validation and state management.
-* **`unit_test.py`**: `unittest` suite covering internal logic (BPF generation, directory naming) and mocked capture flows.
-* **`api_test.py`**: `pytest` suite using `TestClient` to validate API endpoints and integration flows.
+# Requirements
 
----
+* **System Tools:** `tshark` (must be installed in the container environment).
+* **Python Libs:** `fastapi`, `scapy`, `pydantic`.
+* **Privileges:** Must run with `NET_ADMIN` or similar capabilities to capture packets on the network interface.
 
-## 1. Core Architecture
+# Configuration
 
-### Capture Lifecycle
-The system follows a specific flow for every batch request:
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `OUTPUT_ROOT` | `/output` | Directory where captured PCAPs are saved. |
+| `LOG_LEVEL` | `DEBUG` | Logging verbosity. |
 
-1.  **Request**: Client sends a batch of targets to `/start`.
-2.  **Validation**: Inputs are validated via Pydantic models in `sessions.py`.
-3.  **Session Creation**:
-    * A unique Session Code is generated (e.g., `121` for Linux/Chrome/Kyber).
-    * Output directories are created under `OUTPUT_ROOT//session-`.
-    * A BPF filter is constructed based on the selected mode.
-4.  **Threading**: A background thread is spawned for each target using `_capture_job`.
-5.  **Capture**: `scapy.AsyncSniffer` records traffic to a raw `.pcap` file.
-6.  **Termination**: Capture stops via timeout (`duration_sec`) or manual signal (`/done`).
-7.  **Post-Processing**: The raw PCAP is passed to `_split_streams_tshark` to extract specific TCP streams.
+# Usage
 
-### Directory Hierarchy & Naming Scheme
-Outputs are organized using a 3-digit code derived from the target metadata.
+## API Endpoints
 
-* **Digit 1 (OS)**: 1=Linux, 2=Windows, 3=MacOS.
-* **Digit 2 (Browser)**: 1=Firefox, 2=Chrome.
-* **Digit 3 (Algo)**: 0=Non-PQC, 1=Kyber, 2=MLKEM.
+### 1. Start Capture (`POST /start`)
+Initiates the recording process for one or more targets.
 
-**Example Path:**
-`/output/121/session-2023-10-27_10-00-00/raw-172_18_0_5.pcap`.
+* **Body:** `StartBatchRequest`
+    * `targets`: List of capture configurations.
+* **TargetSpec:**
+    * `os`, `browser`, `algorithm`: Metadata for naming the output folder.
+    * `container_ip`: The specific IP to sniff.
+    * `domain`: The target domain (e.g., `pq.cloudflareresearch.com`). The sniffer resolves this to IPs to build a precise BPF filter.
+    * `duration_sec`: Max recording time (failsafe).
 
----
-
-## 2. API Reference
-
-### `POST /start`
-Initiates a batch of capture sessions.
-
-**Payload Schema (`StartBatchRequest`):**
-```jsonc
+**Example Payload:**
+```json
 {
   "targets": [
     {
-      "os": "linux",                    // linux | windows | macos
-      "browser": "chrome",              // chrome | firefox
-      "algo": 1,                        // 0=Non-PQC, 1=Kyber, 2=MLKEM
-      "session_count": 1,               // Number of independent recordings (1-1000)
-      "container_ip": "172.18.0.5",     // Target container IP
-      "duration_sec": 60,               // Capture length (1–10800 seconds)
-      "iface": "pqbench0",              // Interface (default "pqbench0")
-      "filter_mode": "domain",          // none | domain | custom
-      "domain": "pq.cloudflareresearch.com", // Required if filter_mode=domain
-      "ports": "443"                    // Optional comma-separated ports
+      "os": "linux",
+      "browser": "chrome",
+      "algorithm": "kyber",
+      "container_ip": "172.19.0.5",
+      "domain": "google.com",
+      "duration_sec": 60
     }
   ]
 }
 ```
 
-### `POST /done`
-Signals a running session to stop immediately before the duration expires.
+### 2. Stop Capture (`POST /done`)
+Signals the sniffer that the traffic generation is complete for a specific container. This triggers the stop of the recording and the start of post-processing.
 
-**Payload (`DoneRequest`):**
-* Provide either `container_ip` OR `url`.
-* If `url` is provided, DNS resolution is attempted to find the target IP.
-
-### `GET /status`
-Returns the state of all active and completed sessions in memory, including packet counts and errors.
-
-### `GET /ifaces`
-Lists network interfaces visible to the container (useful for debugging network isolation).
-
-### `GET /health`
-Returns `"ok", 200` to indicate the service is running.
-
----
-
-## 3. Key Logic & Internals
-
-### BPF Filter Generation
-The service supports three `filter_mode` strategies in `_build_bpf_filter`:
-
-1.  **`none`**: Captures all traffic to/from the target container IP.
-    * *Formula:* `(host ) and (ip or ip6)`
-2.  **`custom`**: Appends a raw BPF string provided by the user.
-    * *Formula:* `(host ) and ()`
-3.  **`domain`**: Resolves a specific domain to *all* its IPv4/IPv6 addresses and captures traffic only between the container and those IPs.
-    * *Formula:* `(host ) and (ip and (dst host ...))`
-
-**Port Filtering:**
-The helper `_and_ports` injects TCP port constraints (e.g., `tcp port 443`) into the final BPF string if specified.
-
-### Stream Splitting (`_split_streams_tshark`)
-After the raw capture finishes, `tshark` is invoked to split the raw PCAP into individual PCAP files per TCP stream.
-
-**Selection Criteria:**
-A stream is kept only if it meets **all** the following conditions:
-1.  **ClientHello**: Must contain a TLS Handshake Type 1.
-2.  **ServerHello**: Must contain a TLS Handshake Type 2 (enabled by `require_serverhello=True`).
-3.  **Packet Count**: Must have at least `min_packets` (default 30) TCP frames.
-4.  **App Data**: Must contain TLS Application Data (Content Type 23) (enabled by `require_appdata=True` in code, though currently set to `False` in the call).
-
-**Output:**
-* `.../streams/session---.pcap`: Individual stream files.
-* `.../streams/_streams_debug.json`: Log of kept vs. dropped streams with reasons.
-
----
-
-## 4. Configuration & Environment
-
-| Environment Variable | Default | Description |
-| :--- | :--- | :--- |
-| `OUTPUT_ROOT` | `/output` | Base directory for saving PCAP files. |
-| `LOG_LEVEL` | `DEBUG` | Python logging level. |
-
----
-
-## 5. Testing
-
-The project uses a mix of `unittest` for unit testing and `pytest` for API integration testing.
-
-### Running Unit Tests
-Tests `sessions.py` and internal `sniffer.py` logic (mocking Scapy/Tshark).
-```bash
-python -m unittest unit_test.py
+**Example Payload:**
+```json
+{
+  "container_ip": "172.19.0.5"
+}
 ```
 
-### Running API Tests
-Tests the FastAPI endpoints using `TestClient`.
-```bash
-pytest api_test.py
-```
+### 3. Check Status (`GET /status`)
+Returns a list of all active and recently finished sessions, including packet counts and errors.
+
+# Logic Flow
+
+## 1. BPF Construction
+To avoid capturing noise, the Sniffer builds a Berkeley Packet Filter (BPF) dynamically:
+1.  Resolves `domain` to all its IPv4/IPv6 addresses.
+2.  Constructs filter: `(host <CONTAINER_IP>) and (host <DOMAIN_IP_1> or host <DOMAIN_IP_2> ...)`.
+3.  Appends port filters if specified.
+
+## 2. Capture Loop
+* A `Scapy` AsyncSniffer is launched in a background thread.
+* It records until `duration_sec` expires OR a `/done` signal is received.
+* Packets are written to `<OUTPUT_ROOT>/<os_browser_algo>/session-<timestamp>/raw.pcap`.
+
+## 3. Post-Processing (TShark)
+Once capture stops, `_split_streams_tshark` is called to clean the data:
+1.  **Identify Streams:** Scans for TCP streams containing a **ClientHello** (TLS Handshake Type 1).
+2.  **Validate:** Checks each stream for:
+    * **ServerHello** (Handshake Type 2) - ensures the server accepted the connection.
+    * **Minimum Packet Count** (default 30) - filters out dropped/incomplete connections.
+    * **Application Data** - ensures actual data was exchanged.
+3.  **Extract:** Saves valid streams as individual files: `session-<...>-01.pcap`, `session-<...>-02.pcap`, etc.
