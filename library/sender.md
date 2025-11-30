@@ -94,3 +94,9 @@ Execute one of the following scripts depending on your algorithm requirement:
 When the script finishes successfully, the sender will listen on **port 5000**.
 To verify, open **Safari** inside the VM and navigate to:
 `http://localhost:5000`
+
+
+## Additional Notes
+
+* When making any changes to any *.sh file, make sure to run `dos2unix filename.sh`
+to make sure there aren't any invisible non Unix characters!
