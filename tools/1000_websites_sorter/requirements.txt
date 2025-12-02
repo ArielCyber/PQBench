@@ -1,2 +1,2 @@
-emunium
-selenium
+flask==3.1.2
+nodriver==0.48.1
