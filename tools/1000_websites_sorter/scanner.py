@@ -552,3 +552,52 @@ class PageScanner:
             return null;
         })()
         """
+
+    @staticmethod
+    def get_map_scan_js():
+        return """
+            (function() {
+                function isVisible(el) {
+                    const r = el.getBoundingClientRect();
+                    return r.width > 200 && r.height > 200 && 
+                           window.getComputedStyle(el).visibility !== 'hidden';
+                }
+
+                // 1. Look for known Map Containers
+                const selectors = [
+                    '#map', '#googleMap', '.leaflet-container', '.mapboxgl-map', 
+                    '.gm-style', '.ol-viewport', '#canvas', 'canvas'
+                ];
+
+                let bestCandidate = null;
+                let maxArea = 0;
+
+                // Check specific selectors first
+                for (let sel of selectors) {
+                    const els = document.querySelectorAll(sel);
+                    for (let el of els) {
+                        if (isVisible(el)) {
+                            const r = el.getBoundingClientRect();
+                            const area = r.width * r.height;
+                            if (area > maxArea) {
+                                maxArea = area;
+                                bestCandidate = {
+                                    status: "found_map",
+                                    x: r.left + r.width/2,
+                                    y: r.top + r.height/2
+                                };
+                            }
+                        }
+                    }
+                }
+
+                if (bestCandidate) return JSON.stringify(bestCandidate);
+
+                // 2. Fallback: Return Center of Screen (Most maps take up full view)
+                return JSON.stringify({
+                    status: "found_map",
+                    x: window.innerWidth / 2,
+                    y: window.innerHeight / 2
+                });
+            })()
+            """

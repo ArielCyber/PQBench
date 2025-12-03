@@ -154,6 +154,7 @@ class DownloadStrategy(AutomationStrategy):
 
         logger.warning("Could not find a download link or button.")
 
+
 class VideoStrategy(AutomationStrategy):
     async def execute(self):
         logger.info("Strategy: VIDEO")
@@ -167,7 +168,99 @@ class VideoStrategy(AutomationStrategy):
 class MapStrategy(AutomationStrategy):
     async def execute(self):
         logger.info("Strategy: MAP")
-        await self.cursor.zoom_via_js(500, 500, 300)
+
+        js = PageScanner.get_map_scan_js()
+
+        try:
+            result_str = await self.tab.evaluate(js)
+            cx, cy = 500, 400
+
+            if isinstance(result_str, str):
+                data = json.loads(result_str)
+                cx = int(data.get('x', 500))
+                cy = int(data.get('y', 400))
+                logger.info(f"Map center targeted at {cx}, {cy}")
+
+            # 1. Move Cursor to Center
+            await self.cursor.move_to(cx, cy)
+            await asyncio.sleep(1)
+
+            # 2. INTERACTION SEQUENCE
+
+            # A. Zoom IN (Scroll Up)
+            logger.info("Zooming IN...")
+            await self._dispatch_mouse("mouseWheel", cx, cy, deltaY=-300)
+            await asyncio.sleep(2)
+
+            # B. Drag Map (Pan)
+            logger.info("Panning Map...")
+            await self._perform_drag(cx, cy, cx - 200, cy - 200)
+            await asyncio.sleep(1)
+
+            await self._perform_drag(cx - 200, cy - 200, cx, cy)
+            await asyncio.sleep(1)
+
+            # C. Zoom OUT (Scroll Down)
+            logger.info("Zooming OUT...")
+            await self._dispatch_mouse("mouseWheel", cx, cy, deltaY=300)
+            await asyncio.sleep(2)
+
+            logger.info("Map interaction finished.")
+
+        except Exception as e:
+            logger.error(f"Map Strategy Error: {e}")
+
+    async def _dispatch_mouse(self, type_, x, y, button="none", buttons=0, clickCount=0, deltaX=0, deltaY=0):
+        """
+        Internal Helper: Wraps the raw dictionary in a generator to satisfy nodriver's requirements.
+        This keeps the 'execute' method clean and avoids global functions.
+        """
+        cmd_dict = {
+            "method": "Input.dispatchMouseEvent",
+            "params": {
+                "type": type_,
+                "x": x,
+                "y": y,
+                "deltaX": deltaX,
+                "deltaY": deltaY,
+                "button": button,
+                "buttons": buttons,
+                "clickCount": clickCount
+            }
+        }
+
+        # Generator wrapper to bypass 'dict is not iterator' error
+        def command_generator():
+            yield cmd_dict
+
+        await self.tab.send(command_generator())
+
+    async def _perform_drag(self, start_x, start_y, end_x, end_y):
+        """Simulates a drag using the internal dispatch helper."""
+        try:
+            # 1. Move to start
+            await self._dispatch_mouse("mouseMoved", start_x, start_y)
+
+            # 2. Mouse Down (Left Button, buttons=1)
+            await self._dispatch_mouse("mousePressed", start_x, start_y, button="left", buttons=1, clickCount=1)
+            await asyncio.sleep(0.2)
+
+            # 3. Mouse Move (The Drag)
+            steps = 10
+            for i in range(steps + 1):
+                t = i / steps
+                cur_x = int(start_x + (end_x - start_x) * t)
+                cur_y = int(start_y + (end_y - start_y) * t)
+
+                # Keep buttons=1 to simulate holding
+                await self._dispatch_mouse("mouseMoved", cur_x, cur_y, button="left", buttons=1)
+                await asyncio.sleep(0.05)
+
+            # 4. Mouse Up
+            await self._dispatch_mouse("mouseReleased", end_x, end_y, button="left", buttons=0, clickCount=1)
+
+        except Exception as e:
+            logger.error(f"Drag failed: {e}")
 
 
 class CloudStrategy(AutomationStrategy):
@@ -312,6 +405,7 @@ class GameStrategy(AutomationStrategy):
                 await asyncio.sleep(1)
 
         logger.warning("Could not fully engage with the game.")
+
 
 class StrategyFactory:
     @staticmethod
