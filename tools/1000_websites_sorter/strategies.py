@@ -308,7 +308,7 @@ class CloudStrategy(AutomationStrategy):
                         except Exception as cdp_e:
                             logger.error(f"CDP Upload Error: {cdp_e}")
 
-                    # CASE B: Clicked a Button ("Upload", "Import", etc)
+                    # CASE B: Clicked a Button ("Upload", "Import", etc...)
                     elif status == "clicked_button":
                         logger.info(f"Clicked upload trigger: '{data.get('text')}'. Waiting for input to appear...")
                         await asyncio.sleep(2)
@@ -407,6 +407,42 @@ class GameStrategy(AutomationStrategy):
         logger.warning("Could not fully engage with the game.")
 
 
+class RTTStrategy(AutomationStrategy):
+    async def execute(self):
+        logger.info("Strategy: RTT (Ticker/Live Content)")
+
+        # Duration for RTT collection
+        wait_time = 15
+        start_time = asyncio.get_event_loop().time()
+
+        while (asyncio.get_event_loop().time() - start_time) < wait_time:
+            try:
+                # 1. Scroll Top
+                await self.tab.evaluate("window.scrollTo(0, 0);")
+                await asyncio.sleep(0.5)
+
+                # 2. Scroll to Bottom (Active Area)
+                # Calculate mostly full height but back off a bit
+                height = await self.tab.evaluate(
+                    "Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) || 2000")
+                if not isinstance(height, (int, float)):
+                    height = 2000
+
+                target_y = min(1500, height - 500)  # Don't go too deep if infinite scroll
+                await self.tab.evaluate(f"window.scrollTo(0, {target_y});")
+                await asyncio.sleep(0.5)
+
+                # 3. Scroll Up slightly (Trigger viewport changes)
+                await self.tab.evaluate("window.scrollBy(0, -300);")
+                await asyncio.sleep(1.0)
+
+            except Exception as e:
+                logger.error(f"RTT Scroll Error: {e}")
+                await asyncio.sleep(1)
+
+        logger.info(f"Captured RTT traffic for {wait_time} seconds.")
+
+
 class StrategyFactory:
     @staticmethod
     def get_strategy(attribute_name, tab, cursor):
@@ -417,7 +453,8 @@ class StrategyFactory:
             'map': MapStrategy,
             'download': DownloadStrategy,
             'cloud': CloudStrategy,
-            'game': GameStrategy
+            'game': GameStrategy,
+            'rtt': RTTStrategy
         }
         strategy_class = strategies.get(attribute_name.lower(), BrowserStrategy)
         return strategy_class(tab, cursor)
