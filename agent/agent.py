@@ -96,7 +96,7 @@ def run_all_matrix():
         target_algo_list = ["kyber", "mlkem", "non-pqc"]
 
     # Sessions default
-    if "sessions" not in base_config:
+    if "sessions" not in base_config or "session" not in base_config:
         base_config["sessions"] = 5
 
     generated_jobs = []
