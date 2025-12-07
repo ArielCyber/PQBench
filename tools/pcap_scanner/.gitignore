@@ -1,0 +1,6 @@
+/.venv
+/.idea
+/pqc_unique_domains_kyber.csv
+/pqc_unique_domains_mlkem_browsing_cloud_and_part_download.csv
+/pqc_unique_domains_mlkem_only_audio_video.csv
+/pqc_unique_domains_mlkem_without_audio_video.csv

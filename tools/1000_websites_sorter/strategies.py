@@ -158,11 +158,86 @@ class DownloadStrategy(AutomationStrategy):
 class VideoStrategy(AutomationStrategy):
     async def execute(self):
         logger.info("Strategy: VIDEO")
-        await asyncio.sleep(5)
-        js = PageScanner.get_video_scan_js()
-        result = await self.tab.evaluate(js)
-        if result and "video" in result:
-            logger.info("Video found, interacting...")
+
+        js_scan = PageScanner.get_video_scan_js()
+
+        # We track state to retry if playback doesn't start
+        attempted_click = False
+        start_time = asyncio.get_event_loop().time()
+
+        while (asyncio.get_event_loop().time() - start_time) < 30:
+            try:
+                result_str = await self.tab.evaluate(js_scan)
+                if not isinstance(result_str, str):
+                    await asyncio.sleep(1)
+                    continue
+
+                data = json.loads(result_str)
+                v_type = data.get("type")
+                x = data.get("x", 0)
+                y = data.get("y", 0)
+
+                # SUCCESS: Video is detected as playing
+                if v_type == "video_playing":
+                    logger.info("Video verified playing. Hovering and watching...")
+                    await self.cursor.move_to(x, y)
+                    await asyncio.sleep(20)  # Capture traffic
+                    return
+
+                # RETRY LOGIC: If we clicked but it's not playing, assume failure and try fallback
+                if attempted_click and v_type != "video_playing":
+                    logger.warning("Click failed to start video. Retrying with center click...")
+                    # Fallback: Click dead center of the discovered element (or screen center)
+                    target_x = x if x > 0 else 500
+                    target_y = y if y > 0 else 400
+                    await self.cursor.click_via_cdp(target_x, target_y)
+
+                    # Double-tap insurance (Pause/Play toggle is better than stuck paused)
+                    await asyncio.sleep(0.5)
+                    await self.cursor.click_via_cdp(target_x, target_y)
+
+                    # Last Resort: JS Force Play
+                    logger.info("Attempting JS Force Play...")
+                    await self.tab.evaluate("document.querySelectorAll('video').forEach(v => v.play())")
+
+                    attempted_click = False  # Reset to allow re-scanning
+                    await asyncio.sleep(5)
+                    continue
+
+                # ACTION: Click Large Button (Best)
+                if v_type == "play_button_large":
+                    logger.info(f"Found Large Play Button at {x},{y}. Clicking...")
+                    await self.cursor.click_via_cdp(x, y)
+                    attempted_click = True
+                    await asyncio.sleep(4)
+                    continue
+
+                # ACTION: Click Container/Iframe
+                elif v_type in ["video_container", "video_iframe"]:
+                    logger.info(f"Found Video Container at {x},{y}. Clicking center...")
+                    await self.cursor.click_via_cdp(x, y)
+                    attempted_click = True
+                    await asyncio.sleep(4)
+                    continue
+
+                # ACTION: Click Small Button (Last Resort)
+                elif v_type == "play_button_small":
+                    logger.info(f"Found Small Play Button at {x},{y}. Clicking...")
+                    await self.cursor.click_via_cdp(x, y)
+                    attempted_click = True
+                    await asyncio.sleep(4)
+                    continue
+
+                else:
+                    logger.info("Scanning for video...")
+                    await self._scroll_reading()
+                    await asyncio.sleep(1)
+
+            except Exception as e:
+                logger.error(f"Video Strategy Error: {e}")
+                await asyncio.sleep(1)
+
+        logger.warning("Could not verify video playback (Time limit).")
 
 
 class MapStrategy(AutomationStrategy):

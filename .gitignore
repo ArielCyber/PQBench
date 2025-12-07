@@ -3,7 +3,8 @@
 /output
 /sender_windows/windows-kyber
 /sender_windows/windows-mlkem
+/sender_windows/.wdm
 *.im1
 /shared
-/macos-mlkem
-/macos-kyber
+/sender_mac/macos-kyber
+/sender_mac/macos-mlkem

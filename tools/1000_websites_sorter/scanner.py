@@ -543,15 +543,114 @@ class PageScanner:
     @staticmethod
     def get_video_scan_js():
         return """
-        (function() {
-            const video = document.querySelector('video');
-            if(video) {
-                const r = video.getBoundingClientRect();
-                return JSON.stringify({ type: 'video', x: r.x + r.width/2, y: r.y + r.height/2 });
-            }
-            return null;
-        })()
-        """
+            (function() {
+                try {
+                    function isVisible(el, minW=10, minH=10) {
+                        if (!el) return false;
+                        const r = el.getBoundingClientRect();
+                        return r.width >= minW && r.height >= minH && 
+                               window.getComputedStyle(el).visibility !== 'hidden' &&
+                               window.getComputedStyle(el).display !== 'none' &&
+                               window.getComputedStyle(el).opacity !== '0';
+                    }
+
+                    // 1. PRIORITY: LARGE OVERLAYS & BIG PLAY BUTTONS
+                    // These are safer to click than tiny icons in the corner.
+                    const bigSelectors = [
+                        '.vp-target',                      // Vimeo Click Overlay (Best target)
+                        '.ytp-large-play-button',          // YouTube Big Play
+                        '.vjs-big-play-button',            // VideoJS Big Play
+                        '.plyr__control--overlaid',        // Plyr Overlay
+                        '.jw-display-icon-container',      // JW Player
+                        'div[class*="play-button"]'        // Generic large divs
+                    ];
+
+                    for (let sel of bigSelectors) {
+                        const el = document.querySelector(sel);
+                        if (el && isVisible(el, 50, 50)) { // Must be at least 50x50
+                            const r = el.getBoundingClientRect();
+                            return JSON.stringify({
+                                type: "play_button_large",
+                                x: r.left + r.width/2,
+                                y: r.top + r.height/2
+                            });
+                        }
+                    }
+
+                    // 2. CHECK FOR PLAYING VIDEO
+                    const videos = document.querySelectorAll('video');
+                    for (let v of videos) {
+                        if (isVisible(v, 100, 100)) {
+                            const r = v.getBoundingClientRect();
+                            // Check if playing (currentTime > 0 is key)
+                            if (v.currentTime > 0 && !v.paused && !v.ended && v.readyState > 2) {
+                                return JSON.stringify({
+                                    type: "video_playing",
+                                    x: r.left + r.width/2,
+                                    y: r.top + r.height/2
+                                });
+                            }
+                        }
+                    }
+
+                    // 3. FALLBACK: SMALL CONTROL BUTTONS
+                    // (Only if we didn't find a big one or a playing video)
+                    const smallSelectors = [
+                        '[data-play-button="true"]',       // Vimeo Control Bar
+                        'button[aria-label^="Play"]',
+                        'button[title^="Play"]',
+                        'button[class*="play"]'
+                    ];
+
+                    for (let sel of smallSelectors) {
+                        const els = document.querySelectorAll(sel);
+                        for (let el of els) {
+                            if (isVisible(el, 10, 10)) {
+                                const r = el.getBoundingClientRect();
+                                return JSON.stringify({
+                                    type: "play_button_small",
+                                    x: r.left + r.width/2,
+                                    y: r.top + r.height/2
+                                });
+                            }
+                        }
+                    }
+
+                    // 4. FALLBACK: IFRAME OR PAUSED VIDEO TAG
+                    // If we found nothing else, point to the video container itself
+                    for (let v of videos) {
+                        if (isVisible(v, 100, 100)) {
+                            const r = v.getBoundingClientRect();
+                            return JSON.stringify({
+                                type: "video_container",
+                                x: r.left + r.width/2,
+                                y: r.top + r.height/2
+                            });
+                        }
+                    }
+
+                    const iframes = document.querySelectorAll('iframe');
+                    for (let i of iframes) {
+                        if (isVisible(i, 200, 150)) {
+                            const src = (i.src || "").toLowerCase();
+                            if (src.includes('youtube') || src.includes('vimeo') || src.includes('player')) {
+                                const r = i.getBoundingClientRect();
+                                return JSON.stringify({
+                                    type: "video_iframe",
+                                    x: r.left + r.width/2,
+                                    y: r.top + r.height/2
+                                });
+                            }
+                        }
+                    }
+
+                    return JSON.stringify({type: "searching"});
+
+                } catch(e) {
+                    return JSON.stringify({type: "error", msg: e.toString()});
+                }
+            })()
+            """
 
     @staticmethod
     def get_map_scan_js():

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import socket
 import pandas as pd
 from urllib.parse import urlparse
@@ -75,10 +76,6 @@ def load_domains_from_excel(attributes):
 
 # --- 2. SNIFFER LOGIC ---
 class LocalSniffer:
-    """
-    Captures packets for a specific domain context.
-    """
-
     def __init__(self, domain, attribute, output_folder):
         self.domain = domain
         self.attribute = attribute
@@ -88,36 +85,39 @@ class LocalSniffer:
 
     def _resolve_ip(self, url):
         try:
-            # Ensure scheme for urlparse
             if not url.startswith("http"):
                 url = f"https://{url}"
             hostname = urlparse(url).hostname
-            # Resolve to IPv4
             return socket.gethostbyname(hostname)
         except:
             return None
 
     def start(self):
-        # Create output path
+        # 1. Strip Query String (remove everything after ?)
+        clean_url = self.domain.split('?')[0]
+
+        # 2. Replace ALL invalid filesystem characters with underscores
+        # Allows: alphanumeric, underscore, dash, dot. Everything else becomes '_'
+        safe_domain = re.sub(r'[^\w\-_\.]', '_', clean_url)
+
+        # Limit length to prevent OS errors (max 255 usually)
+        if len(safe_domain) > 100:
+            safe_domain = safe_domain[:100]
+
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        # Sanitize domain for filename
-        safe_domain = self.domain.replace('/', '_').replace(':', '')
         filename = f"{self.attribute}_{safe_domain}_{timestamp}.pcap"
         self.outfile = os.path.join(self.output_folder, filename)
 
-        # Resolve IP to create a BPF filter (host x.x.x.x)
+        # IP Filter
         target_ip = self._resolve_ip(self.domain)
-
-        # BPF Filter: Capture traffic to/from the target IP
-        # If resolution fails, it defaults to None (captures everything - noisy!)
         bpf_filter = f"host {target_ip}" if target_ip else None
 
         if bpf_filter:
-            logger.info(f"Sniffer armed for IP: {target_ip} ({self.domain}) -> {self.outfile}")
+            logger.info(f"Sniffer armed for IP: {target_ip} ({self.domain}) -> {filename}")
         else:
             logger.warning(f"Could not resolve IP for {self.domain}. Capturing ALL traffic.")
 
-        # Start Scapy AsyncSniffer
+        # Start Scapy
         self.sniffer = AsyncSniffer(
             filter=bpf_filter,
             store=True
